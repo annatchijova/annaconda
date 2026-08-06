@@ -754,7 +754,7 @@ class VIGIAAgent:
         try:
             # Try to import the real orchestrator
             # sys.path already adjusted with guard at start of _run_pipeline (FIX P2-6)
-            from sift.sift_orchestrator import SIFTOrchestrator
+            from sift_orchestrator_shim import SIFTOrchestrator
             orchestrator = SIFTOrchestrator(self.case_id)
 
             # L-037: propagate examiner-declared acquisition metadata to orchestrator.
@@ -763,7 +763,7 @@ class VIGIAAgent:
 
             # Build inputs based on evidence type
             kwargs = _build_orchestrator_kwargs(self.evidence_path, params)
-            result = orchestrator.run_full_analysis(**kwargs)
+            result = orchestrator.analyze(**kwargs)
 
         except ImportError:
             # Fallback: use text pipeline if orchestrator is unavailable

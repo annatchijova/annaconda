@@ -10,7 +10,7 @@ import hashlib
 import json
 
 try:
-    from vigia.core.ebs_v1 import SignalOutput
+    from core.ebs_v1 import SignalOutput
 except ImportError:
     @dataclass
     class SignalOutput:
