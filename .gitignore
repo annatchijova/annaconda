@@ -22,3 +22,8 @@ dist/
 
 # OS
 .DS_Store
+
+# vigia_agent.py output bundles (test runs)
+*_bundle.json
+*_bundle.json.sha256
+*_reasoning_trace.json
