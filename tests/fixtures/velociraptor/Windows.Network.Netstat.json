@@ -1,0 +1,22 @@
+[
+  {
+    "Pid": 5120,
+    "Name": "updater.exe",
+    "Status": "ESTABLISHED",
+    "Laddr.IP": "10.0.10.21",
+    "Laddr.Port": 49812,
+    "Raddr.IP": "198.51.100.7",
+    "Raddr.Port": 443,
+    "Timestamp": "2026-08-12T14:04:02Z"
+  },
+  {
+    "Pid": 612,
+    "Name": "svchost.exe",
+    "Status": "LISTEN",
+    "Laddr.IP": "0.0.0.0",
+    "Laddr.Port": 135,
+    "Raddr.IP": "",
+    "Raddr.Port": 0,
+    "Timestamp": "2026-08-12T14:04:02Z"
+  }
+]

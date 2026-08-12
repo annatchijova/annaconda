@@ -16,6 +16,7 @@
     "collection",
     "artifacts",
     "manifest",
+    "canonicalize_version",
     "window_hash"
   ],
   "additionalProperties": false,
@@ -113,6 +114,11 @@
           "size_bytes": { "type": "integer", "minimum": 0 }
         }
       }
+    },
+    "canonicalize_version": {
+      "type": "string",
+      "description": "Version of the canonical serialization schema (core/canonicalize.py) the window_hash was computed under.",
+      "enum": ["2"]
     },
     "window_hash": {
       "type": "string",

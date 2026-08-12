@@ -35,7 +35,7 @@ them, never against core internals.
 |---|---|---|---|
 | 0 | Hygiene: pyproject, pytest wrappers over inline self-tests, cross-process determinism check | core | done |
 | 1 | Contracts: the three versioned schemas + fixtures | core | schemas done, fixtures pending |
-| 2 | Velociraptor batch-first: lab as external service, adapter (REST/mTLS client + curated VQL templates) → evidence windows | core | next |
+| 2 | Velociraptor batch-first: lab as external service, adapter (REST/mTLS client + curated VQL templates) → evidence windows | core | adapter done against fixtures; live integration pending lab |
 | 3 | Window manager + hash-chained sealed verdict stream + live-mode runner (poll → window → verdict → emit) | core | pending |
 | 4 | Purple Team dashboard: consumes the sealed stream (SSE), MITRE timeline, red-vs-blue readout, ATT&CK Navigator heatmap | collaborator | can start now against fixtures |
 | 5 | ML triage: surprisal-ensemble port (nominate-only, see contract) | collaborator | can start now against fixtures |
@@ -65,6 +65,20 @@ Boundary rules:
    entry with its license notice.
 3. No peer project's agentic loop is adopted. Every one of them places the
    LLM in the decision path; VIGIA's differentiator is that it never does.
+
+## 4b. Known integration gaps (found empirically, 2026-08-12)
+
+Feeding a fixture-built window through the real scorer works end-to-end
+(verdict emitted, live CAIE engaged) but surfaced two Phase 2 refinements:
+
+1. CAIE classifies adapter artifacts as `evidence_type=default` — the
+   adapter's vocabulary (memory/network/event_log/registry) must be mapped
+   to the taxonomy CAIE keys its spoofability weights on.
+2. CAIE degrades `base_trust` for missing acquisition metadata
+   (`examiner_id`, NIST SP 800-86 4.3). Live collections need custody
+   metadata (operator identity, collection tool = velociraptor+version)
+   carried into artifact metadata. This is honest degradation working as
+   designed — fix by supplying the metadata, not by silencing the warning.
 
 ## 5. Risks
 
