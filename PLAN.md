@@ -36,7 +36,7 @@ them, never against core internals.
 | 0 | Hygiene: pyproject, pytest wrappers over inline self-tests, cross-process determinism check | core | done |
 | 1 | Contracts: the three versioned schemas + fixtures | core | schemas done, fixtures pending |
 | 2 | Velociraptor batch-first: lab as external service, adapter (REST/mTLS client + curated VQL templates) → evidence windows | core | adapter done against fixtures; live integration pending lab |
-| 3 | Window manager + hash-chained sealed verdict stream + live-mode runner (poll → window → verdict → emit) | core | chain done (core/verdict_stream.py, replay-reproducible); runner loop pending |
+| 3 | Window manager + hash-chained sealed verdict stream + live-mode runner (poll → window → verdict → emit) | core | done — core/verdict_stream.py + scripts_lib/live_runner.py (capture mock/live, replay verifier); live mode untested until lab |
 | 4 | Purple Team dashboard: consumes the sealed stream (SSE), MITRE timeline, red-vs-blue readout, ATT&CK Navigator heatmap | collaborator | can start now against fixtures |
 | 5 | ML triage: surprisal-ensemble port (nominate-only, see contract) | collaborator | can start now against fixtures |
 | 6 | CRONOS audit-trail wiring for the investigation itself | core | stretch |
