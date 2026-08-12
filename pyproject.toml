@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vigia"
+version = "0.1.0"
+description = "VIGIA — deterministic DFIR forensic engine with sealed, reproducible, court-defensible verdicts"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+# The decision path is stdlib-only by design (Daubert discipline: no floats,
+# no black-box dependencies in any sealed value). Keep this list empty unless
+# the addition is confined to the narrative/UX layer.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["core", "sift", "tools", "pipeline", "inference", "security", "verdict", "scripts_lib"]
+py-modules = ["vigia_agent", "vigia_scorer", "sift_orchestrator_shim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
