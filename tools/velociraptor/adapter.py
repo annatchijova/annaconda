@@ -267,6 +267,13 @@ def normalize_rows(template_id: str, rows: Iterable[dict],
             "artifact_id": artifact_id,
             "evidence_type": template["evidence_type"],
             "source_tool": "velociraptor",
+            # Duplicated from metadata on purpose: the integration bridge
+            # detects acquisition custody at artifact TOP level and, when it
+            # sees none, synthesizes legacy custody INto metadata — including
+            # a fabricated write_blocker_used=True, which would dishonestly
+            # inflate live telemetry to STRONG assurance. Present here, the
+            # bridge leaves our honest custody untouched.
+            "acquisition_tool": "velociraptor",
             # No-suspicion prior, exact fraction string. raw_score means
             # "suspicion reported by the producing tool" [0,1]; the adapter
             # collects, it does not analyze, so it declares the EBS v1
@@ -313,7 +320,10 @@ def window_to_case(window: dict) -> dict:
     from fractions import Fraction
     case_artifacts = []
     for artifact in window["artifacts"]:
-        converted = dict(artifact)
+        # Deep copy, not dict(): downstream consumers (the integration
+        # bridge, CAIE) mutate artifact internals in place, and a shared
+        # nested dict would let them silently corrupt the sealed window.
+        converted = json.loads(json.dumps(artifact))
         if isinstance(artifact.get("raw_score"), str):
             converted["raw_score"] = float(Fraction(artifact["raw_score"]))
         case_artifacts.append(converted)

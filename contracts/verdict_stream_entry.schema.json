@@ -12,6 +12,7 @@
     "prev_entry_hash",
     "verdict",
     "bundle_sha256",
+    "canonicalize_version",
     "entry_hash"
   ],
   "additionalProperties": false,
@@ -89,6 +90,11 @@
       "type": "string",
       "maxLength": 4096,
       "description": "Optional locator of the LLM narrative. Stored BESIDE the seal, never inside it; absent narrative never degrades the verdict."
+    },
+    "canonicalize_version": {
+      "type": "string",
+      "description": "Version of the canonical serialization schema (core/canonicalize.py) the entry_hash was computed under.",
+      "enum": ["2"]
     },
     "entry_hash": {
       "type": "string",

@@ -253,6 +253,31 @@ def test_artifacts_carry_verifiable_provenance_chains():
         assert chain[1][len("sha256:"):] in manifest_hashes
 
 
+def test_scoring_cannot_mutate_the_sealed_window():
+    """The bridge/CAIE mutate artifact internals in place; the sealed window
+    must be immune (deep copy at the feed boundary), and our honest custody
+    (write_blocker_used=False) must survive scoring instead of being
+    replaced by synthesized legacy custody."""
+    from tools.velociraptor.adapter import window_to_case
+    from vigia_scorer import _vigia_score
+
+    window, _ = _collect()
+    case = window_to_case(window)
+    _vigia_score(case)
+
+    assert verify_window(window), (
+        "scoring mutated the sealed window through a shared reference"
+    )
+    for artifact in case["artifacts"]:
+        md = artifact["metadata"]
+        assert md["acquisition_tool"] == "velociraptor", (
+            "bridge replaced live custody with synthesized legacy custody"
+        )
+        assert md["write_blocker_used"] is False, (
+            "a write blocker was fabricated for live telemetry"
+        )
+
+
 def test_window_to_case_refuses_tampered_window():
     from tools.velociraptor.adapter import window_to_case
     window, _ = _collect()
