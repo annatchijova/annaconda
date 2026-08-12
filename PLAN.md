@@ -37,14 +37,21 @@ them, never against core internals.
 | 1 | Contracts: the three versioned schemas + fixtures | core | schemas done, fixtures pending |
 | 2 | Velociraptor batch-first: lab as external service, adapter (REST/mTLS client + curated VQL templates) → evidence windows | core | adapter done against fixtures; live integration pending lab |
 | 3 | Window manager + hash-chained sealed verdict stream + live-mode runner (poll → window → verdict → emit) | core | done — core/verdict_stream.py + scripts_lib/live_runner.py (capture mock/live, replay verifier); live mode untested until lab |
-| 4 | Purple Team dashboard: consumes the sealed stream (SSE), MITRE timeline, red-vs-blue readout, ATT&CK Navigator heatmap | collaborator | can start now against fixtures |
-| 5 | ML triage: surprisal-ensemble port (nominate-only, see contract) | collaborator | can start now against fixtures |
+| 4 | Purple Team view, descoped for solo build: one self-contained static HTML viewer over stream.jsonl (timeline, verdict states, MITRE tags, chain status) — no framework, no build step | solo | pending |
+| 5 | ML triage: interface frozen (contracts/ml_nomination.schema.json); implementation CUT from hackathon scope — pitched as designed-not-built | solo | cut |
 | 6 | CRONOS audit-trail wiring for the investigation itself | core | stretch |
 | 7 | Demo script: scripted red scenarios, rehearsed end-to-end, recorded windows as fallback, replay finale | both | last 2 days, non-negotiable |
 
-MVP: one Windows endpoint, batch-poll Velociraptor, chained sealed windows,
-live MITRE timeline, deterministic replay demo. Stretch: ML nominator,
-CRONOS, true streaming, multiple endpoints.
+MVP (solo build): one Windows endpoint, batch-poll Velociraptor, chained
+sealed windows, the static stream viewer, deterministic replay demo.
+Stretch, in order: attack-scenario fixtures (red side of the demo without
+lab dependency), CRONOS wiring, ML nominator. True streaming and multiple
+endpoints are out.
+
+Team note (2026-08-12): the frontend/ML collaborator dropped out; every
+workstream is now solo. Phases 4-5 were re-scoped accordingly — the
+contracts stay frozen so the cut ML layer remains honestly pitchable as
+"interface designed, implementation deferred".
 
 ## 4. External repositories: what we take, and the license boundary
 
