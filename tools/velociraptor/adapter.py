@@ -192,7 +192,9 @@ class RestTransport:
 # Normalization
 # ---------------------------------------------------------------------------
 
-def normalize_rows(template_id: str, rows: Iterable[dict]) -> tuple[list, dict]:
+def normalize_rows(template_id: str, rows: Iterable[dict],
+                   custody: Optional[dict] = None,
+                   source_hashes: tuple = ()) -> tuple[list, dict]:
     """Turn raw VQL result rows into core-scorer artifacts.
 
     Returns ``(artifacts, report)``. ``report`` states honestly what was
@@ -201,6 +203,27 @@ def normalize_rows(template_id: str, rows: Iterable[dict]) -> tuple[list, dict]:
 
     Artifact ids are content-derived (``<template>-<sha256(row)[:16]>``), so
     the output is independent of row order and stable across runs.
+
+    ``custody`` carries the Daubert chain-of-custody fields CAIE audits
+    (NIST SP 800-86 4.3): ``examiner_id`` (operator identity) and
+    ``acquisition_timestamp`` (ISO 8601 with timezone — the window freeze
+    time supplied by the caller, never a wall clock read here). Each
+    artifact additionally gets ``acquisition_tool: "velociraptor"``,
+    a per-row ``acquisition_hash`` (sha256 of the canonical row), and
+    ``write_blocker_used: False`` — honestly False: live endpoint telemetry
+    has no write blocker, so CAIE's G4 gate must not pass; the reachable
+    assurance tier for live collection is FORENSIC (3/4), not STRONG, by
+    design. Passing ``custody=None`` omits the operator fields and CAIE
+    degrades base_trust, audited; the report says so.
+
+    ``source_hashes`` are the sha256 digests of the raw collected files
+    backing these rows (the window manifest entries). Each artifact's
+    ``provenance_chain`` is then [row content hash] + source hashes — every
+    link independently verifiable: the row hash is recomputable from the row,
+    the source hashes appear in the sealed window manifest. An empty chain is
+    honest for a transport without file custody, and the scorer's EPC factor
+    degrades trust accordingly (1/10) — that degradation is the system
+    working, not a bug to silence.
     """
     template = TEMPLATES[template_id]
     ts_field = template["timestamp_field"]
@@ -214,19 +237,51 @@ def normalize_rows(template_id: str, rows: Iterable[dict]) -> tuple[list, dict]:
         if not isinstance(timestamp, str) or not timestamp:
             dropped_no_timestamp += 1
             continue
-        artifact_id = f"{template_id}-{_sha256_canonical(row)[:16]}"
+        row_sha256 = _sha256_canonical(row)
+        artifact_id = f"{template_id}-{row_sha256[:16]}"
         if artifact_id in artifacts:
             duplicates += 1
             continue
+        summary = ", ".join(
+            f"{f}={row[f]}" for f in template.get("summary_fields", ())
+            if f in row and row[f] not in ("", None)
+        )
+        metadata = {
+            "tool": "velociraptor",
+            "vql_template": template_id,
+            "row": row,
+            "acquisition_tool": "velociraptor",
+            "acquisition_hash": f"sha256:{row_sha256}",
+            "write_blocker_used": False,
+        }
+        if custody is not None:
+            for field in ("examiner_id", "acquisition_timestamp"):
+                value = custody.get(field)
+                if not isinstance(value, str) or not value:
+                    raise AdapterError(
+                        f"custody.{field} is required and must be a "
+                        f"non-empty string when custody is supplied"
+                    )
+                metadata[field] = value
         artifacts[artifact_id] = {
             "artifact_id": artifact_id,
             "evidence_type": template["evidence_type"],
+            "source_tool": "velociraptor",
+            # No-suspicion prior, exact fraction string. raw_score means
+            # "suspicion reported by the producing tool" [0,1]; the adapter
+            # collects, it does not analyze, so it declares the EBS v1
+            # no-signal floor (1/20 = 0.05, the bridge clamp floor and the
+            # legacy-import convention). A midpoint like 1/2 would read as
+            # "moderate suspicion" per artifact and flip benign windows to
+            # MALICE. Real suspicion enters later, from analyzers and CAIE,
+            # never from the collection layer.
+            "raw_score": "1/20",
+            "description": f"velociraptor {template_id}: {summary}" if summary
+                           else f"velociraptor {template_id} row {row_sha256[:16]}",
             "timestamp": timestamp,
-            "metadata": {
-                "tool": "velociraptor",
-                "vql_template": template_id,
-                "row": row,
-            },
+            "provenance_chain": [f"sha256:{row_sha256}"]
+                                + [f"sha256:{h}" for h in source_hashes],
+            "metadata": metadata,
         }
     report = {
         "template_id": template_id,
@@ -234,8 +289,40 @@ def normalize_rows(template_id: str, rows: Iterable[dict]) -> tuple[list, dict]:
         "artifacts_out": len(artifacts),
         "dropped_no_timestamp": dropped_no_timestamp,
         "deduplicated": duplicates,
+        "custody": "present" if custody is not None else
+                   "absent — CAIE will degrade base_trust, audited",
     }
     return [artifacts[k] for k in sorted(artifacts)], report
+
+
+def window_to_case(window: dict) -> dict:
+    """Convert a sealed evidence window into the case dict the core scorer
+    consumes.
+
+    This is the one sanctioned float boundary: windows store ``raw_score``
+    as an exact fraction string (nothing sealed carries a float), while the
+    scorer's canonical EBS v1 artifact schema expects a numeric raw_score
+    under its own P0 deterministic-rounding protocol. The conversion happens
+    here, at the feed boundary, in one place — never inside a sealed payload.
+    """
+    if not verify_window(window):
+        raise AdapterError(
+            "refusing to feed a window whose hash does not verify — "
+            "evidence integrity comes before scoring"
+        )
+    from fractions import Fraction
+    case_artifacts = []
+    for artifact in window["artifacts"]:
+        converted = dict(artifact)
+        if isinstance(artifact.get("raw_score"), str):
+            converted["raw_score"] = float(Fraction(artifact["raw_score"]))
+        case_artifacts.append(converted)
+    return {
+        "case_id": window["case_id"],
+        "artifacts": case_artifacts,
+        "temporal_violations": [],
+        "provenance_analysis": {},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -302,20 +389,30 @@ def verify_window(window: dict) -> bool:
 
 def collect_window(transport: Transport, *, case_id: str, sequence: int,
                    source: str, host: dict, time_start_utc: str,
-                   time_end_utc: str, requests: list,
+                   time_end_utc: str, requests: list, examiner_id: str,
                    poll_interval_s: float = 2.0,
                    timeout_s: float = 300.0) -> tuple[dict, list]:
     """Run curated collections through a transport and freeze the window.
 
     ``requests`` is a list of ``(template_id, params)`` pairs; every pair is
-    validated against the registry before anything runs. Returns
-    ``(window, reports)`` where ``reports`` are the normalization reports —
-    surface them, they are the honest record of what was dropped.
+    validated against the registry before anything runs. ``examiner_id``
+    identifies the operator responsible for this collection (chain of
+    custody; CAIE audits its absence). The acquisition timestamp recorded on
+    every artifact is ``time_end_utc`` — the window freeze instant supplied
+    by the caller — keeping the window a pure function of its inputs.
+    Returns ``(window, reports)`` where ``reports`` are the normalization
+    reports — surface them, they are the honest record of what was dropped.
     """
+    if not isinstance(examiner_id, str) or not examiner_id.strip():
+        raise AdapterError("examiner_id is required (chain of custody)")
     validated = [
         (template_id, validate_request(template_id, params))
         for template_id, params in requests
     ]
+    custody = {
+        "examiner_id": examiner_id.strip(),
+        "acquisition_timestamp": time_end_utc,
+    }
 
     artifacts: list = []
     manifest: list = []
@@ -342,9 +439,13 @@ def collect_window(transport: Transport, *, case_id: str, sequence: int,
             raise AdapterError(f"flow {flow_id} ({template_id}) failed on the endpoint")
 
         rows = transport.flow_results(client_id, flow_id, artifact_name)
-        normalized, report = normalize_rows(template_id, rows)
+        flow_manifest = transport.manifest(client_id, flow_id, artifact_name)
+        normalized, report = normalize_rows(
+            template_id, rows, custody=custody,
+            source_hashes=tuple(m["sha256"] for m in flow_manifest),
+        )
         artifacts.extend(normalized)
-        manifest.extend(transport.manifest(client_id, flow_id, artifact_name))
+        manifest.extend(flow_manifest)
         reports.append(report)
 
     window = build_evidence_window(

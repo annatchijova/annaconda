@@ -25,6 +25,7 @@ def main() -> None:
         host={"client_id": "C.mock01", "hostname": "WIN11-VICTIM", "os": "windows"},
         time_start_utc="2026-08-12T14:00:00Z",
         time_end_utc="2026-08-12T14:05:00Z",
+        examiner_id="purple-op-01",
         requests=[
             ("pslist", {}),
             ("netstat", {}),

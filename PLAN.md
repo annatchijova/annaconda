@@ -66,19 +66,29 @@ Boundary rules:
 3. No peer project's agentic loop is adopted. Every one of them places the
    LLM in the decision path; VIGIA's differentiator is that it never does.
 
-## 4b. Known integration gaps (found empirically, 2026-08-12)
+## 4b. Integration gaps (found empirically 2026-08-12; CLOSED same day)
 
-Feeding a fixture-built window through the real scorer works end-to-end
-(verdict emitted, live CAIE engaged) but surfaced two Phase 2 refinements:
+Feeding a fixture-built window through the real scorer surfaced, and then
+closed, four integration findings — kept here because each encodes a
+convention the live path must not regress on:
 
-1. CAIE classifies adapter artifacts as `evidence_type=default` — the
-   adapter's vocabulary (memory/network/event_log/registry) must be mapped
-   to the taxonomy CAIE keys its spoofability weights on.
-2. CAIE degrades `base_trust` for missing acquisition metadata
-   (`examiner_id`, NIST SP 800-86 4.3). Live collections need custody
-   metadata (operator identity, collection tool = velociraptor+version)
-   carried into artifact metadata. This is honest degradation working as
-   designed — fix by supplying the metadata, not by silencing the warning.
+1. Evidence vocabulary: template evidence types must be keys of BOTH CAIE
+   vocabularies (`_DOMAIN_MAP` and `EVIDENCE_PROFILES` — different sets).
+   A miss degrades to the `default` profile or triggers
+   CAIE_INVALID_EVIDENCE_TYPE. Enforced by a lockstep test.
+2. Custody metadata: artifacts carry `acquisition_tool=velociraptor` (added
+   to CAIE's whitelist beside F-Response, its live-acquisition precedent),
+   per-row `acquisition_hash`, the caller-supplied freeze timestamp, and
+   `examiner_id`. `write_blocker_used` is honestly False — live telemetry
+   reaches FORENSIC assurance (3/4 gates), never STRONG, by design.
+3. Provenance chains: each artifact links its row-content hash and the
+   source-file hash sealed in the window manifest; an empty chain hits the
+   scorer's EPC floor (trust 1/10) — that degradation stays as designed for
+   transports without file custody.
+4. No-signal prior: `raw_score` means tool-reported suspicion, so the
+   adapter declares the EBS v1 floor `1/20`, never a midpoint (a `1/2`
+   prior flipped a benign window to MALICE_HIGH — regression-tested now).
+   Real suspicion enters from analyzers and CAIE, never from collection.
 
 ## 5. Risks
 

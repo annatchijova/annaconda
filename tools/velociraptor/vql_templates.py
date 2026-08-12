@@ -9,7 +9,9 @@ template-driven VQL broker, MIT; no code copied.)
 
 Each template declares:
 - ``artifact``        : the Velociraptor artifact name to collect
-- ``evidence_type``   : the evidence class the core scorer understands
+- ``evidence_type``   : a key of CAIE's _DOMAIN_MAP taxonomy (tools/caie.py) —
+  never a free-form label; tests/test_velociraptor_adapter.py enforces the
+  lockstep so a typo cannot silently degrade to the "default" profile
 - ``timestamp_field`` : which row field carries the event/observation time
 - ``parameters``      : allowed parameter slots, each with a fullmatch regex
 
@@ -29,22 +31,25 @@ _P_GLOB = r"[A-Za-z0-9 ._:\\/*?-]{1,256}"
 TEMPLATES: Dict[str, dict] = {
     "pslist": {
         "artifact": "Windows.System.Pslist",
-        "evidence_type": "memory",
+        "evidence_type": "memory_process",
         "timestamp_field": "CreateTime",
+        "summary_fields": ("Name", "Pid", "Username"),
         "description": "Running processes with command line and binary path.",
         "parameters": {},
     },
     "netstat": {
         "artifact": "Windows.Network.Netstat",
-        "evidence_type": "network",
+        "evidence_type": "network_flow",
         "timestamp_field": "Timestamp",
+        "summary_fields": ("Name", "Pid", "Raddr.IP", "Raddr.Port", "Status"),
         "description": "Active network connections with owning process.",
         "parameters": {},
     },
     "process_creation_evtx": {
         "artifact": "Windows.EventLogs.Evtx",
-        "evidence_type": "event_log",
+        "evidence_type": "windows_event_log",
         "timestamp_field": "EventTime",
+        "summary_fields": ("EventID", "Computer", "NewProcessName", "SubjectUserName"),
         "description": "Windows event log records (e.g. 4688 process creation).",
         "parameters": {
             "Channel": _P_CHANNEL,
@@ -53,8 +58,9 @@ TEMPLATES: Dict[str, dict] = {
     },
     "scheduled_tasks": {
         "artifact": "Windows.System.TaskScheduler",
-        "evidence_type": "registry",
+        "evidence_type": "filesystem_artifact",
         "timestamp_field": "MTime",
+        "summary_fields": ("FullPath", "Command"),
         "description": "Scheduled tasks (persistence surface, T1053).",
         "parameters": {
             "TasksPath": _P_GLOB,

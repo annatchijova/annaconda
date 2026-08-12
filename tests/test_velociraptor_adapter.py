@@ -37,6 +37,7 @@ def _collect(sequence=0):
         host=HOST,
         time_start_utc="2026-08-12T14:00:00Z",
         time_end_utc="2026-08-12T14:05:00Z",
+        examiner_id="purple-op-01",
         requests=REQUESTS,
     )
 
@@ -86,14 +87,64 @@ def test_normalize_is_row_order_independent():
     assert a_fwd == a_rev
 
 
-def test_adapter_assigns_no_scores():
+def test_adapter_scores_are_neutral_priors_only():
+    """The adapter must not weigh evidence: every artifact carries exactly
+    the neutral prior "1/2" (schema compliance so the bridge keeps our
+    evidence_type), never a content-derived value."""
     rows = json.loads((FIXTURES / "Windows.System.Pslist.json").read_text())
     artifacts, _ = normalize_rows("pslist", rows)
     assert artifacts, "fixture produced no artifacts"
     for artifact in artifacts:
-        assert "raw_score" not in artifact, (
-            "the adapter must not score evidence — that is decision-path work"
+        assert artifact["raw_score"] == "1/20", (
+            "the adapter must not score evidence — that is decision-path "
+            "work; 1/20 is the EBS v1 no-signal floor, not an assessment"
         )
+        assert artifact["source_tool"] == "velociraptor"
+        assert artifact["description"].startswith("velociraptor pslist")
+
+
+def test_evidence_types_are_caie_taxonomy_keys():
+    """Lockstep with BOTH CAIE vocabularies: _DOMAIN_MAP (domain/sub-band
+    classification) and EVIDENCE_PROFILES (add_artifact whitelist +
+    spoofability). They are different sets — being in one but not the other
+    triggers CAIE_INVALID_EVIDENCE_TYPE security alerts at scoring time."""
+    from tools.caie import _DOMAIN_MAP, EVIDENCE_PROFILES
+    from tools.velociraptor.vql_templates import TEMPLATES
+    for template_id, template in TEMPLATES.items():
+        evidence_type = template["evidence_type"]
+        assert evidence_type in _DOMAIN_MAP, (
+            f"template {template_id!r}: {evidence_type!r} not in _DOMAIN_MAP"
+        )
+        assert evidence_type in EVIDENCE_PROFILES, (
+            f"template {template_id!r}: {evidence_type!r} not in "
+            f"EVIDENCE_PROFILES (add_artifact would reject it)"
+        )
+
+
+def test_custody_metadata_reaches_forensic_assurance_tier():
+    """Live collection must pass CAIE gates G1+G2+G3 and honestly fail G4
+    (no write blocker exists for live telemetry) — FORENSIC tier, 3/4."""
+    from fractions import Fraction
+    from tools.caie import _compute_acquisition_assurance
+    rows = json.loads((FIXTURES / "Windows.System.Pslist.json").read_text())
+    artifacts, report = normalize_rows("pslist", rows, custody={
+        "examiner_id": "purple-op-01",
+        "acquisition_timestamp": "2026-08-12T14:05:00Z",
+    })
+    assert report["custody"] == "present"
+    for artifact in artifacts:
+        assurance = _compute_acquisition_assurance(artifact["metadata"])
+        assert assurance == Fraction(3, 4), (
+            f"expected FORENSIC (3/4) for {artifact['artifact_id']}, "
+            f"got {assurance}"
+        )
+        assert artifact["metadata"]["write_blocker_used"] is False
+
+
+def test_custody_absence_is_reported_not_hidden():
+    rows = json.loads((FIXTURES / "Windows.System.Pslist.json").read_text())
+    _, report = normalize_rows("pslist", rows, custody=None)
+    assert report["custody"].startswith("absent")
 
 
 # -- window sealing ----------------------------------------------------------
@@ -151,6 +202,64 @@ def test_window_hash_reproducible_across_processes():
         "window seal is not reproducible across processes: "
         f"{digests[0][:12]}… vs {digests[1][:12]}…"
     )
+
+
+# -- core integration --------------------------------------------------------
+
+def test_window_feeds_core_scorer_with_full_taxonomy():
+    """End-to-end: a sealed window flows through the real scorer with live
+    CAIE, keeping our evidence types (no 'default' degradation) and without
+    CAIE schema-validation skips."""
+    from tools.velociraptor.adapter import window_to_case
+    from vigia_scorer import _vigia_score
+
+    window, _ = _collect()
+    result = _vigia_score(window_to_case(window))
+
+    assert result["verdict"] != "ERROR"
+    # Regression guard for the no-signal prior semantics: telemetry with no
+    # tool-assigned suspicion must never score as malice by construction.
+    # (With a midpoint prior this exact window produced MALICE_HIGH.)
+    assert result["verdict"] == "NOISE", (
+        f"unscored telemetry produced {result['verdict']} — the adapter is "
+        f"leaking suspicion into the decision path"
+    )
+    assert result["caie_fractures_source"] == "live_caie"
+    seen_types = {et["evidence_type"] for et in result["effective_trusts"]}
+    assert "default" not in seen_types, (
+        f"some artifact degraded to the default profile: {seen_types}"
+    )
+    assert {"memory_process", "network_flow",
+            "windows_event_log"} <= seen_types
+    domains = set(result["r43_active_domains"])
+    assert not any(d.startswith("UNKNOWN") for d in domains), domains
+    # Provenance chains (row hash + source-file hash) must clear the EPC
+    # degradation floor: full trust, not the 1/10 empty-chain penalty.
+    for et in result["effective_trusts"]:
+        assert et["effective_trust"] > 0.5, (
+            f"{et['artifact_id']} trust {et['effective_trust']} — "
+            f"provenance chain not honored"
+        )
+
+
+def test_artifacts_carry_verifiable_provenance_chains():
+    window, _ = _collect()
+    manifest_hashes = {m["sha256"] for m in window["manifest"]}
+    for artifact in window["artifacts"]:
+        chain = artifact["provenance_chain"]
+        assert len(chain) == 2, artifact["artifact_id"]
+        assert all(link.startswith("sha256:") for link in chain)
+        # Second link must reference a file sealed in the window manifest.
+        assert chain[1][len("sha256:"):] in manifest_hashes
+
+
+def test_window_to_case_refuses_tampered_window():
+    from tools.velociraptor.adapter import window_to_case
+    window, _ = _collect()
+    tampered = json.loads(json.dumps(window))
+    tampered["artifacts"][0]["raw_score"] = "9/10"
+    with pytest.raises(AdapterError, match="hash does not verify"):
+        window_to_case(tampered)
 
 
 # -- boundary validation -----------------------------------------------------

@@ -91,6 +91,13 @@
         "properties": {
           "artifact_id": { "type": "string", "maxLength": 256 },
           "evidence_type": { "type": "string", "maxLength": 64 },
+          "source_tool": { "type": "string", "maxLength": 64 },
+          "description": { "type": "string", "maxLength": 1024 },
+          "provenance_chain": {
+            "type": "array",
+            "description": "Independently verifiable custody links: sha256:<hex> of the row content, then of each raw source file (which must appear in the window manifest).",
+            "items": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+          },
           "timestamp": { "type": "string", "format": "date-time" },
           "raw_score": {
             "type": "string",
