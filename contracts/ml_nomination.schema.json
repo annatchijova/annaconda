@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vigia.forensics/contracts/ml_nomination/1",
+  "title": "VIGIA ML nomination",
+  "description": "A candidate event the ML triage layer NOMINATES for adjudication by the deterministic core. Nominations are hints, not verdicts: they carry no decision semantics, their scores are advisory floats that never enter a sealed payload, and the core is free to ignore them. If a nominated event matters, the core re-derives its weight with exact arithmetic from the underlying evidence.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "nomination_id",
+    "window_id",
+    "nominated_by",
+    "detector",
+    "event_ref",
+    "reason"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "nomination_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "window_id": {
+      "type": "string",
+      "description": "The evidence window this nomination points into.",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "nominated_by": {
+      "const": "ml",
+      "description": "Fixed marker so downstream code can never mistake a nomination for a core-derived signal."
+    },
+    "detector": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "Which detector fired (e.g. rare-type, rare-transition, timing-burst, timing-beacon, content-surprisal)."
+    },
+    "event_ref": {
+      "type": "object",
+      "required": ["artifact_id"],
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": { "type": "string", "maxLength": 256 },
+        "record_index": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "surprisal_bits": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Advisory anomaly score in bits (-log2 p). Float is acceptable HERE ONLY: the nomination layer is outside every sealed path by construction."
+    },
+    "rank": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Position in the shortlist for this window (1 = most surprising)."
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 1024,
+      "description": "Plain-language explanation of why this event was nominated."
+    }
+  }
+}

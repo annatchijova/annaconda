@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vigia.forensics/contracts/evidence_window/1",
+  "title": "VIGIA evidence window",
+  "description": "A frozen, immutable snapshot of live telemetry for one time window. Produced by the Velociraptor adapter (or a replay source), consumed by the deterministic core. The window_hash is the SHA-256 of the canonical serialization of this document with the window_hash field absent.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "window_id",
+    "case_id",
+    "sequence",
+    "source",
+    "host",
+    "time_start_utc",
+    "time_end_utc",
+    "collection",
+    "artifacts",
+    "manifest",
+    "window_hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "window_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic per-case window counter. Gaps are a chain-integrity violation."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["velociraptor", "replay"],
+      "description": "replay = the same window re-fed from disk; must reproduce identical verdict seals."
+    },
+    "host": {
+      "type": "object",
+      "required": ["client_id", "hostname"],
+      "additionalProperties": false,
+      "properties": {
+        "client_id": { "type": "string", "maxLength": 256 },
+        "hostname": { "type": "string", "maxLength": 256 },
+        "os": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "time_start_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC, inclusive lower bound of the window."
+    },
+    "time_end_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC, exclusive upper bound. Events at or after this instant belong to a later window."
+    },
+    "collection": {
+      "type": "object",
+      "description": "Provenance of the VQL collection that produced this window.",
+      "required": ["hunt_ids", "vql_template_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "hunt_ids": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 256 }
+        },
+        "flow_ids": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 256 }
+        },
+        "vql_template_ids": {
+          "type": "array",
+          "description": "Identifiers of pre-committed VQL templates. Raw ad-hoc VQL is forbidden by construction; only curated templates with filled parameter slots may run.",
+          "items": { "type": "string", "maxLength": 256 }
+        },
+        "velociraptor_version": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Normalized forensic artifacts in the shape the core scorer already consumes (ForensicBundle artifact schema).",
+      "items": {
+        "type": "object",
+        "required": ["artifact_id", "evidence_type", "timestamp"],
+        "properties": {
+          "artifact_id": { "type": "string", "maxLength": 256 },
+          "evidence_type": { "type": "string", "maxLength": 64 },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "raw_score": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)/([1-9][0-9]*)$",
+            "description": "Exact fraction num/den. Never a float."
+          },
+          "metadata": { "type": "object" }
+        }
+      }
+    },
+    "manifest": {
+      "type": "array",
+      "description": "SHA-256 of every raw collected file backing this window, for chain of custody.",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "size_bytes"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string", "maxLength": 4096 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "size_bytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "window_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

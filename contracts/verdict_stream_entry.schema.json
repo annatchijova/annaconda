@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vigia.forensics/contracts/verdict_stream_entry/1",
+  "title": "VIGIA verdict stream entry",
+  "description": "One sealed verdict in the live hash chain. Produced by the deterministic core after scoring one evidence window; consumed by the dashboard, CRONOS, and the replay verifier. The entry_hash is the SHA-256 of the canonical serialization of this document with the entry_hash field absent. Tamper evidence: entry N commits to entry N-1 via prev_entry_hash; genesis entries use 64 zeros.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "case_id",
+    "sequence",
+    "window_hash",
+    "prev_entry_hash",
+    "verdict",
+    "bundle_sha256",
+    "entry_hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "case_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Must equal the sequence of the evidence window it adjudicates."
+    },
+    "window_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "window_hash of the evidence window this verdict is sealed over."
+    },
+    "prev_entry_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "entry_hash of the previous stream entry; 64 zeros for sequence 0."
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["state", "score", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "MALICE_HIGH",
+            "MALICE_MEDIUM",
+            "BENIGN_HIGH",
+            "BENIGN_MEDIUM",
+            "ABSTAIN_CONTRADICTION",
+            "ABSTAIN_INSUFFICIENT",
+            "ABSTAIN_DEGRADED",
+            "ESCALATE"
+          ]
+        },
+        "score": {
+          "type": "string",
+          "pattern": "^-?(0|[1-9][0-9]*)/([1-9][0-9]*)$",
+          "description": "Exact fraction num/den. Never a float."
+        },
+        "confidence": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)/([1-9][0-9]*)$",
+          "description": "Exact fraction num/den. Never a float."
+        },
+        "mitre_techniques": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$" }
+        },
+        "determinism_level": {
+          "type": "string",
+          "enum": ["sealed", "best_effort"],
+          "description": "Honest guarantee level. Partial evidence never silently claims 'sealed' strength; a window scored under degradation says so here."
+        }
+      }
+    },
+    "bundle_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 of the full sealed verdict bundle (stored beside the stream, verifiable independently)."
+    },
+    "bundle_ref": {
+      "type": "string",
+      "maxLength": 4096,
+      "description": "Optional locator (path/URL) of the full bundle. Never trusted without checking bundle_sha256."
+    },
+    "narrative_ref": {
+      "type": "string",
+      "maxLength": 4096,
+      "description": "Optional locator of the LLM narrative. Stored BESIDE the seal, never inside it; absent narrative never degrades the verdict."
+    },
+    "entry_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}
