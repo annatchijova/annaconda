@@ -1,5 +1,32 @@
+# Velociraptor binary — downloaded and GPG-verified by scripts/setup_velociraptor.sh,
+# not committed (85MB+ per platform binary, easily reproducible)
+tools/velociraptor/velociraptor-*
+!tools/velociraptor/velociraptor-*.sig
+
+# Python
 __pycache__/
 *.pyc
+.venv/
+venv/
 .pytest_cache/
-*.bak
 *.egg-info/
+*.bak
+
+# Node
+node_modules/
+.next/
+dist/
+
+# Local env / secrets
+.env
+.env.local
+*.pem
+*.key
+
+# OS
+.DS_Store
+
+# vigia_agent.py output bundles (test runs)
+*_bundle.json
+*_bundle.json.sha256
+*_reasoning_trace.json
