@@ -15,6 +15,20 @@ entry points (`vigia_agent.py` Mode 1, `vigia_scorer.py` Mode 2).
 Not yet built: streaming ingestion, Velociraptor integration (only
 `scripts/setup_velociraptor.sh` exists), dashboard, ML triage, CRONOS wiring.
 
+## 1b. Hackathon framing (All Things Agentic, Google/Gemini — deadline 2026-08-31)
+
+Submission requires Gemini 3.5+, a Google Agent Framework (ADK), and a Google
+Cloud service, with a <=4 min video showing the backend on Google Cloud.
+VIGIA reconciles this WITHOUT abandoning its thesis: the ADK+Gemini agent
+DRIVES the investigative loop (chooses hunts, decides when to adjudicate,
+narrates for the examiner) and the ML layer NOMINATES — but the sealed verdict
+stays deterministic. The agent acts and guides; it never decides. That
+separation is the whole pitch: it targets Best Architectural Design and
+Fortified Enterprise Fleet, where a "LLM decides the verdict" competitor cannot
+follow. Model default gemini-3.5-flash (env VIGIA_GEMINI_MODEL). Proven: a live
+agent turn runs the full loop and narrates the sealed verdict verbatim
+(scripts_lib/agent_smoke.py).
+
 ## 2. The one design decision that shapes everything
 
 **Windows, not streams, get sealed.** The live adapter freezes telemetry into
@@ -38,7 +52,9 @@ them, never against core internals.
 | 2 | Velociraptor batch-first: lab as external service, adapter (REST/mTLS client + curated VQL templates) → evidence windows | core | adapter done against fixtures; live integration pending lab |
 | 3 | Window manager + hash-chained sealed verdict stream + live-mode runner (poll → window → verdict → emit) | core | done — core/verdict_stream.py + scripts_lib/live_runner.py (capture mock/live, replay verifier); live mode untested until lab |
 | 4 | Purple Team view, descoped for solo build: one self-contained static HTML viewer over stream.jsonl (timeline, verdict states, MITRE tags, chain status) — no framework, no build step | solo | pending |
-| 5 | ML triage: interface frozen (contracts/ml_nomination.schema.json); implementation CUT from hackathon scope — pitched as designed-not-built | solo | cut |
+| 4a | ADK+Gemini agent: drives the hunt loop, adjudicates via sealed tools, narrates for the examiner (agent/) | solo | done — live loop proven against Gemini 3.5 |
+| 5 | ML triage: REACTIVATED for the hackathon (surprisal-ensemble port, nominate-only); interface in contracts/ml_nomination.schema.json | solo | pending |
+| 6 | Google Cloud: backend on Cloud Run, verdict stream to Firestore, video shows it running on GCP | solo | pending |
 | 6 | CRONOS audit-trail wiring for the investigation itself | core | stretch |
 | 7 | Demo script: scripted red scenarios, rehearsed end-to-end, recorded windows as fallback, replay finale | both | last 2 days, non-negotiable |
 

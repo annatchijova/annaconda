@@ -30,3 +30,6 @@ dist/
 *_bundle.json
 *_bundle.json.sha256
 *_reasoning_trace.json
+
+# Scratch prototypes and smoke outputs (not part of the deliverable)
+scratch/
