@@ -47,7 +47,7 @@ class ConsultTools:
         if meta is None:
             return {
                 "found": False,
-                "message": f"{technique_id!r} is not in VIGIA's ATT&CK map. "
+                "message": f"{technique_id!r} is not in annaconda's ATT&CK map. "
                            f"Known techniques include: "
                            f"{', '.join(sorted(MASTER_TTP_DICTIONARY)[:12])}…",
             }
@@ -66,7 +66,7 @@ class ConsultTools:
         }
 
     def explain_verdict_state(self, state: str) -> dict:
-        """Explain what one of VIGIA's eight verdict states means.
+        """Explain what one of annaconda's eight verdict states means.
 
         Returns the human label, the action a examiner should take, the
         confidence range, and the Daubert/admissibility note — so a junior
@@ -76,7 +76,7 @@ class ConsultTools:
         if config is None:
             return {
                 "found": False,
-                "message": f"{state!r} is not a VIGIA verdict state. Valid "
+                "message": f"{state!r} is not a recognized verdict state. Valid "
                            f"states: {', '.join(s.value for s in VerdictState)}",
             }
         return {

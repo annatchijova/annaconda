@@ -31,7 +31,7 @@ def test_explain_unknown_verdict_state_is_honest():
     t = ConsultTools()
     out = t.explain_verdict_state("DEFINITELY_GUILTY")
     assert out["found"] is False
-    assert "not a VIGIA verdict state" in out["message"]
+    assert "not a recognized verdict state" in out["message"]
 
 
 def test_explain_mitre_grounded_or_honest():

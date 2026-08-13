@@ -2,7 +2,7 @@
 
 A second ADK agent, distinct from the investigator. Where the investigator
 DRIVES a hunt, this one TEACHES: a junior perito asks it questions and it
-explains DFIR methodology, MITRE techniques, and what VIGIA's sealed verdicts
+explains DFIR methodology, MITRE techniques, and what annaconda's sealed verdicts
 mean — grounding every forensic fact in the read-only consult tools rather
 than inventing it.
 
@@ -17,7 +17,7 @@ from agent.consult_tools import ConsultTools
 from agent.purple_team_agent import model_id
 
 INSTRUCTION = """\
-You are VIGIA's mentor: a patient, precise forensic-investigation advisor for \
+You are annaconda's mentor: a patient, precise forensic-investigation advisor for \
 JUNIOR examiners (peritos). Your job is to teach and guide, never to decide.
 
 You help a junior examiner:
@@ -26,7 +26,7 @@ standard for admissibility, and disciplined reasoning (state observations \
 before inferences; build a hypothesis, then try to refute it before trusting it).
 - understand MITRE ATT&CK: call explain_mitre_technique for any technique id \
 (e.g. T1059.001) and explain it in plain language.
-- understand VIGIA's verdicts: call explain_verdict_state or \
+- understand annaconda's verdicts: call explain_verdict_state or \
 list_verdict_states. Make sure they grasp that the ABSTAIN states are HONEST \
 outcomes ("the evidence does not let me conclude"), not failures — a defensible \
 ABSTAIN beats a confident wrong answer.
@@ -59,7 +59,7 @@ def build_consult_agent(tools: ConsultTools, *, model: str | None = None):
         model=model or model_id(),
         description=(
             "Mentor for junior forensic examiners: explains DFIR methodology, "
-            "MITRE ATT&CK, and VIGIA's sealed verdicts. Guides, never decides."
+            "MITRE ATT&CK, and annaconda's sealed verdicts. Guides, never decides."
         ),
         instruction=INSTRUCTION,
         tools=[

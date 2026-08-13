@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VIGIA — Live Purple Team Forensics</title>
+<title>annaconda — Live Purple Team Forensics</title>
 <style>
   :root{
     --paper:#eef0f1;--paper-deep:#e4e7e8;--card:#f7f8f8;
@@ -102,7 +102,7 @@
 </head>
 <body>
 <nav class="top">
-  <div class="brand">VIGÍA<span>.</span></div>
+  <div class="brand">annaconda<span>.</span></div>
   <div class="links">
     <a class="btn ghost" href="/exhibit">Live exhibit</a>
     <a class="btn ghost" href="/consult">Mentor console</a>
@@ -115,7 +115,7 @@
     <div>
       <p class="eyebrow">Live Purple Team &middot; Deterministic DFIR</p>
       <h1>Forensic verdicts <span class="thin">a court could trust</span> — in real time.</h1>
-      <p class="lede">VIGÍA analyzes an attack as it unfolds and seals a reproducible, MITRE-mapped verdict. The AI guides the investigation; it never decides it.</p>
+      <p class="lede">annaconda analyzes an attack as it unfolds and seals a reproducible, MITRE-mapped verdict. The AI guides the investigation; it never decides it.</p>
       <div class="hero-cta">
         <a class="btn primary" href="/exhibit">Open the live exhibit &rarr;</a>
         <a class="btn ghost" href="/consult">Ask the mentor</a>
@@ -171,9 +171,9 @@
     <h2>Using it</h2>
     <p class="sub">A five-minute tour of the live exhibit.</p>
     <div class="guide">
-      <div class="g"><div class="num">1</div><div><h3>Run a sealed investigation</h3><p>On the <a href="/exhibit">exhibit</a>, press <b>Run sealed investigation</b>. VIGÍA freezes evidence windows and seals a verdict for each. Or press <b>Ask the agent</b> to let Gemini drive and narrate.</p></div></div>
+      <div class="g"><div class="num">1</div><div><h3>Run a sealed investigation</h3><p>On the <a href="/exhibit">exhibit</a>, press <b>Run sealed investigation</b>. annaconda freezes evidence windows and seals a verdict for each. Or press <b>Ask the agent</b> to let Gemini drive and narrate.</p></div></div>
       <div class="g"><div class="num">2</div><div><h3>Read the verdict &amp; custody</h3><p>Each window shows its sealed state, exact score (a fraction, never a float), MITRE techniques, and the chain of custody — <code>prev → window → entry</code> hashes.</p></div></div>
-      <div class="g"><div class="num">3</div><div><h3>Replay to prove it</h3><p>Press <b>Replay &amp; re-verify seals</b>. VIGÍA re-derives every seal from the recorded windows and confirms <code>HASHES MATCH</code>. Determinism, demonstrated.</p></div></div>
+      <div class="g"><div class="num">3</div><div><h3>Replay to prove it</h3><p>Press <b>Replay &amp; re-verify seals</b>. annaconda re-derives every seal from the recorded windows and confirms <code>HASHES MATCH</code>. Determinism, demonstrated.</p></div></div>
       <div class="g"><div class="num">4</div><div><h3>Consult the mentor</h3><p>Not sure what a verdict means or how to proceed? The <a href="/consult">mentor console</a> explains it — and reminds you that an honest <i>ABSTAIN</i> beats a confident wrong answer.</p></div></div>
     </div>
   </section>
@@ -188,13 +188,15 @@
       <span><b>MITRE ATT&amp;CK</b> v14.1</span>
       <span>Deterministic core &middot; <b>no floats, no LLM</b></span>
       <span>SHA-256 sealed &middot; <b>reproducible</b></span>
+      <span><b>Open source</b> &middot; Apache-2.0</span>
     </div>
+    <p class="sub" style="margin-top:1.1rem;">Not required by the hackathon — annaconda is open source because forensic tooling that decides on people's lives should be inspectable by anyone.</p>
   </section>
 </div>
 
 <footer>
   <div class="wrap">
-    VIGÍA &middot; Live purple-team forensics &middot; the deterministic engine decides, the agent guides.<br>
+    annaconda &middot; Live purple-team forensics &middot; the deterministic engine decides, the agent guides.<br>
     The verdict is sealed before any model speaks — reproducible, MITRE-mapped, tamper-evident.
   </div>
 </footer>

@@ -111,7 +111,7 @@ def consult_page() -> FileResponse:
 def health() -> dict:
     return {
         "status": "ok",
-        "service": "vigia-live-purple-team",
+        "service": "annaconda-live-purple-team",
         "version": app.version,
         "model": model_id(),
         "vertex_ai": os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").upper() == "TRUE",

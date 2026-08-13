@@ -1,4 +1,4 @@
-"""Deterministic tool layer for the VIGIA purple-team agent.
+"""Deterministic tool layer for the annaconda purple-team agent.
 
 These are the functions the ADK agent is allowed to call. They are plain,
 type-hinted, docstring'd Python (ADK introspects the signatures and docstrings

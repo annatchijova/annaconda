@@ -1,4 +1,4 @@
-"""ADK Agent wiring for the VIGIA purple-team investigator.
+"""ADK Agent wiring for the annaconda purple-team investigator.
 
 Builds a Google ADK Agent (Gemini) whose tools are a PurpleTeamSession's
 bound methods. The agent drives the hunt loop and explains sealed results to
@@ -6,7 +6,7 @@ the examiner; the deterministic core, reached only through the adjudicate
 tool, produces the verdict. Swapping the model changes the wording, never the
 verdict — which is exactly the architecture test.
 
-Model: env VIGIA_GEMINI_MODEL, default gemini-3.5-flash (meets the hackathon
+Model: env annaconda_GEMINI_MODEL, default gemini-3.5-flash (meets the hackathon
 "Gemini 3.5 or newer" requirement; GA, fast, strong at tool-calling).
 """
 
@@ -20,11 +20,11 @@ DEFAULT_MODEL = "gemini-3.5-flash"
 
 
 def model_id() -> str:
-    return os.environ.get("VIGIA_GEMINI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    return os.environ.get("annaconda_GEMINI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
 INSTRUCTION = """\
-You are VIGIA, an autonomous purple-team forensic investigator assisting a \
+You are annaconda, an autonomous purple-team forensic investigator assisting a \
 forensic examiner (the "perito") during a live exercise on a Windows endpoint.
 
 Your job is to DRIVE and EXPLAIN the investigation — never to decide the verdict.
