@@ -54,7 +54,7 @@ them, never against core internals.
 | 4 | Purple Team view, descoped for solo build: one self-contained static HTML viewer over stream.jsonl (timeline, verdict states, MITRE tags, chain status) — no framework, no build step | solo | pending |
 | 4a | ADK+Gemini agent: drives the hunt loop, adjudicates via sealed tools, narrates for the examiner (agent/) | solo | done — live loop proven against Gemini 3.5 |
 | 5 | ML triage: REACTIVATED for the hackathon (surprisal-ensemble port, nominate-only); interface in contracts/ml_nomination.schema.json | solo | pending |
-| 6 | Google Cloud: backend on Cloud Run, verdict stream to Firestore, video shows it running on GCP | solo | pending |
+| 6 | Google Cloud: FastAPI backend on Cloud Run + Gemini via Vertex AI | solo | done — live at vigia-live (us-central1), agent mode proven end-to-end; Firestore is an optional persistence enhancement (see DEPLOY.md) |
 | 6 | CRONOS audit-trail wiring for the investigation itself | core | stretch |
 | 7 | Demo script: scripted red scenarios, rehearsed end-to-end, recorded windows as fallback, replay finale | both | last 2 days, non-negotiable |
 

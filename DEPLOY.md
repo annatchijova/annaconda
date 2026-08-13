@@ -1,0 +1,88 @@
+# VIGIA — Google Cloud deployment
+
+Step-by-step spin-up for the live purple-team backend on Google Cloud Run.
+This is the deployed backend the demo video shows running on Google Cloud.
+
+## What runs where
+
+- **Cloud Run** (`vigia-live`, region `us-central1`) hosts the FastAPI backend
+  (`service/app.py`): the deterministic forensic core + the ADK agent behind
+  an HTTP API.
+- **Vertex AI** serves Gemini 3.5 Flash to the ADK agent, through the Cloud
+  Run service identity — no API key stored in the service.
+- The verdict is sealed by the deterministic core, never by Gemini. Swapping
+  the model changes only the narration.
+
+Three mandatory hackathon boxes, all checked: Gemini 3.5+ (Vertex AI), a
+Google Agent Framework (ADK), and a Google Cloud service (Cloud Run).
+
+## Prerequisites
+
+- A Google Cloud project with billing (`vigia-497422`).
+- Enabled APIs: `run`, `aiplatform`, `cloudbuild`, `artifactregistry`.
+  ```bash
+  gcloud services enable run.googleapis.com aiplatform.googleapis.com \
+      cloudbuild.googleapis.com artifactregistry.googleapis.com \
+      --project vigia-497422
+  ```
+
+## Deploy
+
+```bash
+gcloud run deploy vigia-live \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --memory 1Gi --cpu 1 --timeout 300 \
+  --set-env-vars GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_LOCATION=global \
+  --project vigia-497422
+```
+
+### Gotcha: Vertex location for Gemini 3.x is `global`, not a region
+
+Gemini 3.x publisher models are served on Vertex AI's **`global`** endpoint,
+not regional ones. `GOOGLE_CLOUD_LOCATION=us-central1` yields a 404
+(`Publisher model ... was not found`). Set `GOOGLE_CLOUD_LOCATION=global`
+(the Cloud Run service itself still lives in `us-central1`). To change it on
+an existing service without a rebuild:
+```bash
+gcloud run services update vigia-live --region us-central1 \
+  --update-env-vars GOOGLE_CLOUD_LOCATION=global --project vigia-497422
+```
+
+## Endpoints
+
+Live URL: `https://vigia-live-1028999311218.us-central1.run.app`
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | liveness + model/build info |
+| GET | `/hunts` | the curated VQL hunts available |
+| POST | `/investigate` | run an investigation (mode `scripted` or `agent`) |
+| GET | `/investigations/{id}` | fetch a stored investigation |
+| GET | `/investigations/{id}/stream` | sealed verdict entries (chain re-verified on read) |
+
+Scripted (no LLM, deterministic — the replay/dashboard path):
+```bash
+curl -s -X POST "$URL/investigate" -H 'Content-Type: application/json' \
+  -d '{"case_id":"DEMO-001","examiner_id":"purple-op-01","mode":"scripted"}'
+```
+
+Agent (Gemini drives the hunt and narrates the sealed verdict):
+```bash
+curl -s -X POST "$URL/investigate" -H 'Content-Type: application/json' \
+  -d '{"case_id":"DEMO-001","examiner_id":"purple-op-01","mode":"agent",
+       "prompt":"Run a baseline sweep, adjudicate it, give the sealed verdict."}'
+```
+
+## Known considerations
+
+- The service is deployed `--allow-unauthenticated` for the demo. Agent-mode
+  requests trigger billed Vertex calls, so add authentication or rate limiting
+  before sharing the URL widely.
+- State is in-memory per instance. For shared, durable state across instances,
+  move the verdict stream to Firestore (the seal is unchanged; only where it
+  is stored differs). Cloud Run alone already satisfies the Google Cloud
+  requirement, so Firestore is an enhancement, not a blocker.
+- Demo evidence is bundled (`tests/fixtures/velociraptor`); swap in the live
+  Velociraptor `RestTransport` once a lab endpoint exists.
