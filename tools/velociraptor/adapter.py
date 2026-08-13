@@ -38,6 +38,19 @@ GENESIS_HASH = "0" * 64
 _ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _SOURCES = ("velociraptor", "replay")
 
+# Fields the deterministic engine (CAIE) reads at artifact metadata top level
+# to detect cross-artifact fractures. The adapter surfaces these from the raw
+# row when present (normalization). It never invents them: benign telemetry
+# has none, so no fracture fires. See CAIE fracture detectors in tools/caie.py.
+_ENGINE_METADATA_FIELDS = (
+    "network_log_time",       # network event time (TEMPORAL_CAUSALITY_VIOLATION)
+    "process_creation_time",  # process creation time (TEMPORAL_CAUSALITY_VIOLATION)
+    "injection_technique",    # PROCESS_INJECTION_ANTIFORENSIC
+    "pid_hidden",             # PROCESS_INJECTION_ANTIFORENSIC
+    "pid",                    # cross-artifact process correlation
+    "dst_ip",                 # network destination
+)
+
 
 def _sha256_canonical(obj) -> str:
     """Exact same recipe as core/bundle_builder._sha256_dict (v2 lockstep)."""
@@ -263,6 +276,15 @@ def normalize_rows(template_id: str, rows: Iterable[dict],
                         f"non-empty string when custody is supplied"
                     )
                 metadata[field] = value
+        # Surface analyzer-extracted fields the deterministic engine reads for
+        # cross-artifact fracture detection (CAIE). This is normalization, not
+        # scoring: the adapter only makes a field the tool already recorded
+        # visible at the metadata top level; whether it constitutes a fracture
+        # is the engine's decision. Benign telemetry simply lacks these fields,
+        # so no fracture fires — the value is never fabricated here.
+        for field in _ENGINE_METADATA_FIELDS:
+            if field in row and row[field] not in ("", None):
+                metadata[field] = row[field]
         artifacts[artifact_id] = {
             "artifact_id": artifact_id,
             "evidence_type": template["evidence_type"],

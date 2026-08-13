@@ -1,0 +1,23 @@
+[
+  {
+    "Pid": 612,
+    "Ppid": 512,
+    "Name": "svchost.exe",
+    "Exe": "C:\\Windows\\System32\\svchost.exe",
+    "CommandLine": "C:\\Windows\\system32\\svchost.exe -k netsvcs -p",
+    "Username": "NT AUTHORITY\\SYSTEM",
+    "CreateTime": "2026-08-12T13:55:02Z"
+  },
+  {
+    "Pid": 6120,
+    "Ppid": 4212,
+    "Name": "updater.exe",
+    "Exe": "C:\\Users\\jdoe\\AppData\\Local\\Temp\\updater.exe",
+    "CommandLine": "updater.exe --silent",
+    "Username": "LAB\\jdoe",
+    "CreateTime": "2026-08-12T14:12:30Z",
+    "process_creation_time": "2026-08-12T14:12:30Z",
+    "injection_technique": "process_hollowing",
+    "pid_hidden": true
+  }
+]

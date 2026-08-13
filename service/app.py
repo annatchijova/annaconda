@@ -40,6 +40,13 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEMO_EVIDENCE = Path(
     os.environ.get("VIGIA_DEMO_EVIDENCE",
                    str(REPO_ROOT / "tests" / "fixtures" / "velociraptor")))
+# Attack-scenario telemetry: a compromised endpoint (process hollowing + a
+# timestomped C2 beacon). The deterministic core catches it structurally — a
+# machine cannot phone home before its process exists — not by an inflated
+# score. Benign is the default; the attack scenario is opt-in.
+ATTACK_EVIDENCE = Path(
+    os.environ.get("VIGIA_ATTACK_EVIDENCE",
+                   str(REPO_ROOT / "tests" / "fixtures" / "attack")))
 
 app = FastAPI(
     title="VIGIA — Live Purple Team",
@@ -52,22 +59,24 @@ app = FastAPI(
 _STORE: dict[str, dict] = {}
 
 
-def _transport():
+def _transport(scenario: str = "benign"):
     """Demo transport. Live Velociraptor (RestTransport) is swapped in via env
     once a lab endpoint exists; until then the service runs on bundled demo
-    evidence, deterministically."""
-    return MockTransport(DEMO_EVIDENCE)
+    evidence, deterministically. ``scenario`` selects benign baseline or the
+    compromised-endpoint attack telemetry."""
+    return MockTransport(ATTACK_EVIDENCE if scenario == "attack" else DEMO_EVIDENCE)
 
 
-def _new_session(case_id: str, examiner_id: str) -> PurpleTeamSession:
+def _new_session(case_id: str, examiner_id: str,
+                 scenario: str = "benign") -> PurpleTeamSession:
     return PurpleTeamSession(
-        _transport(),
+        _transport(scenario),
         case_id=case_id,
         host={"client_id": "C.demo01", "hostname": "WIN11-VICTIM", "os": "windows"},
         examiner_id=examiner_id,
         out_dir=Path(mkdtemp(prefix="vigia-inv-")),
         source="replay",
-        time_base="2026-08-12T14:00:00Z",
+        time_base="2026-08-12T14:10:00Z" if scenario == "attack" else "2026-08-12T14:00:00Z",
     )
 
 
@@ -79,6 +88,7 @@ class InvestigateRequest(BaseModel):
     case_id: str = Field(..., pattern=r"^[A-Za-z0-9._-]{1,128}$")
     examiner_id: str = Field(..., min_length=1, max_length=128)
     mode: str = Field("scripted", pattern=r"^(scripted|agent)$")
+    scenario: str = Field("benign", pattern=r"^(benign|attack)$")
     # scripted mode: list of hunt groups, one sealed window per group.
     hunt_groups: Optional[list[list[str]]] = None
     # agent mode: natural-language instruction for the ADK agent.
@@ -166,10 +176,17 @@ async def _run_agent(session: PurpleTeamSession, prompt: str) -> dict:
 
 @app.post("/investigate")
 async def investigate(req: InvestigateRequest) -> dict:
-    session = _new_session(req.case_id, req.examiner_id)
+    session = _new_session(req.case_id, req.examiner_id, scenario=req.scenario)
 
     if req.mode == "scripted":
-        groups = req.hunt_groups or [["pslist", "netstat"], ["process_creation_evtx"]]
+        if req.hunt_groups:
+            groups = req.hunt_groups
+        elif req.scenario == "attack":
+            # pslist + netstat in ONE window so the cross-artifact fracture
+            # (network beacon before its process existed) is in the same case.
+            groups = [["pslist", "netstat"]]
+        else:
+            groups = [["pslist", "netstat"], ["process_creation_evtx"]]
         result = _run_scripted(session, groups)
     else:
         if not req.prompt:
@@ -184,6 +201,7 @@ async def investigate(req: InvestigateRequest) -> dict:
         "investigation_id": inv_id,
         "case_id": req.case_id,
         "mode": req.mode,
+        "scenario": req.scenario,
         "verdicts": result["verdicts"],
         "narration": result["narration"],
         "chain": chain,

@@ -52,6 +52,8 @@
   button.primary:hover{background:#16324a;}
   button.ghost{color:var(--legal);background:#fff;border:1px solid var(--hairline);}
   button.ghost:hover{background:#eef1f4;}
+  button.danger{color:#fff;background:var(--seal);}
+  button.danger:hover{background:var(--seal-deep);}
   button:active{transform:translateY(1px);}
   button[disabled]{opacity:.5;cursor:default;}
   button:focus-visible{outline:2px solid var(--seal);outline-offset:2px;}
@@ -122,6 +124,7 @@
     <label for="caseId">Case</label>
     <input id="caseId" value="DEMO-001" spellcheck="false">
     <button class="primary" id="runBtn">Run sealed investigation</button>
+    <button class="danger" id="attackBtn">Run attack scenario</button>
     <button class="ghost" id="agentBtn">Ask the agent</button>
     <a class="ghost" href="/consult" style="text-decoration:none;display:inline-block;line-height:1;padding:.62rem 1.2rem;">Mentor console &rarr;</a>
     <span class="spinner" id="spin"></span>
@@ -165,12 +168,13 @@ async function health(){
   try{ const h=await (await fetch("/health")).json(); $("mModel").textContent=h.model+(h.vertex_ai?" · Vertex AI":""); }catch(e){}
 }
 
-async function investigate(mode){
+async function investigate(mode, scenario){
+  scenario=scenario||"benign";
   const caseId=$("caseId").value.trim()||"DEMO-001";
   $("mCase").textContent=caseId;
-  setBusy(true, mode==="agent"?"agent investigating (Gemini)…":"sealing windows…");
+  setBusy(true, mode==="agent"?"agent investigating (Gemini)…":(scenario==="attack"?"analyzing compromised endpoint…":"sealing windows…"));
   try{
-    const payload={case_id:caseId,examiner_id:"purple-op-01",mode};
+    const payload={case_id:caseId,examiner_id:"purple-op-01",mode,scenario};
     if(mode==="agent") payload.prompt="Run a baseline sweep of processes and network as one window, then adjudicate it. Report the sealed verdict.";
     const r=await fetch("/investigate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
     if(!r.ok){ throw new Error("HTTP "+r.status); }
@@ -181,7 +185,7 @@ async function investigate(mode){
   }finally{ setBusy(false,""); }
 }
 
-function setBusy(b,msg){ $("spin").textContent=b?msg:""; $("runBtn").disabled=b; $("agentBtn").disabled=b; }
+function setBusy(b,msg){ $("spin").textContent=b?msg:""; $("runBtn").disabled=b; $("agentBtn").disabled=b; $("attackBtn").disabled=b; }
 
 function render(){
   const inv=STATE.inv; if(!inv||!inv.verdicts.length){ return; }
@@ -244,7 +248,8 @@ async function replay(){
 }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-$("runBtn").onclick=()=>investigate("scripted");
+$("runBtn").onclick=()=>investigate("scripted","benign");
+$("attackBtn").onclick=()=>investigate("scripted","attack");
 $("agentBtn").onclick=()=>investigate("agent");
 $("replayBtn").onclick=replay;
 health();
