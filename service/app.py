@@ -95,6 +95,12 @@ def dashboard() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/consult", include_in_schema=False)
+def consult_page() -> FileResponse:
+    """The mentor console — a junior examiner consults the advisory agent here."""
+    return FileResponse(STATIC_DIR / "consult.html")
+
+
 @app.get("/health")
 def health() -> dict:
     return {
@@ -188,6 +194,53 @@ def get_investigation(inv_id: str) -> dict:
     if record is None:
         raise HTTPException(status_code=404, detail="investigation not found")
     return record
+
+
+# --- mentor consultation agent (a second ADK agent, multi-turn) -------------
+
+CONSULT_APP = "vigia_mentor"
+_consult_runner = None
+_consult_sessions: set[str] = set()
+
+
+def _get_consult_runner():
+    """Lazy singleton ADK runner for the mentor agent, bound to the live
+    investigation store so it can read real sealed cases."""
+    global _consult_runner
+    if _consult_runner is None:
+        from google.adk.runners import InMemoryRunner
+        from agent.consult_agent import build_consult_agent
+        from agent.consult_tools import ConsultTools
+        agent = build_consult_agent(ConsultTools(store=_STORE))
+        _consult_runner = InMemoryRunner(agent=agent, app_name=CONSULT_APP)
+    return _consult_runner
+
+
+class ConsultRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    session_id: Optional[str] = None
+
+
+@app.post("/consult")
+async def consult(req: ConsultRequest) -> dict:
+    """One turn with the mentor agent. Pass the returned session_id back on the
+    next call to keep the conversation (the junior examiner's follow-ups)."""
+    from google.genai import types
+    runner = _get_consult_runner()
+    sid = req.session_id or uuid.uuid4().hex[:12]
+    if sid not in _consult_sessions:
+        await runner.session_service.create_session(
+            app_name=CONSULT_APP, user_id="perito", session_id=sid)
+        _consult_sessions.add(sid)
+    message = types.Content(role="user", parts=[types.Part(text=req.message)])
+    answer = []
+    async for event in runner.run_async(
+            user_id="perito", session_id=sid, new_message=message):
+        if event.is_final_response() and event.content:
+            for part in event.content.parts or []:
+                if getattr(part, "text", None):
+                    answer.append(part.text)
+    return {"session_id": sid, "answer": "".join(answer).strip()}
 
 
 @app.get("/investigations/{inv_id}/stream")
