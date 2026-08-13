@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIGIA — Live Purple Team Forensics</title>
+<style>
+  :root{
+    --paper:#eef0f1;--paper-deep:#e4e7e8;--card:#f7f8f8;
+    --ink:#191d21;--ink-soft:#5a646c;--ink-faint:#8b949a;
+    --hairline:#c9d0d2;--hairline-2:#dbe0e1;
+    --legal:#23425e;--seal:#9e2b1e;--seal-deep:#7e2016;--sealed:#2e664b;--amber:#8a6410;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:radial-gradient(130% 90% at 50% -8%,#f5f6f7 0%,var(--paper) 40%,var(--paper-deep) 100%);
+    color:var(--ink);font-family:var(--serif);line-height:1.6;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 clamp(1rem,4vw,2rem);}
+  a{color:var(--legal);}
+  .eyebrow{font-family:var(--sans);font-size:.66rem;letter-spacing:.32em;text-transform:uppercase;color:var(--ink-soft);margin:0;}
+
+  /* nav */
+  nav.top{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;
+    padding:1.2rem clamp(1rem,4vw,2rem);max-width:1000px;margin:0 auto;}
+  nav.top .brand{font-family:var(--sans);font-weight:700;letter-spacing:.12em;font-size:.9rem;color:var(--ink);}
+  nav.top .brand span{color:var(--legal);}
+  nav.top .links{display:flex;gap:.5rem;flex-wrap:wrap;}
+  .btn{font-family:var(--sans);font-size:.72rem;letter-spacing:.13em;text-transform:uppercase;text-decoration:none;
+    border-radius:4px;padding:.6rem 1.1rem;transition:background .18s,transform .08s;display:inline-block;}
+  .btn.primary{background:var(--legal);color:#fff;} .btn.primary:hover{background:#16324a;}
+  .btn.ghost{background:#fff;color:var(--legal);border:1px solid var(--hairline);} .btn.ghost:hover{background:#eef1f4;}
+  .btn:active{transform:translateY(1px);}
+
+  /* hero */
+  .hero{display:grid;grid-template-columns:1.4fr auto;gap:2rem;align-items:center;
+    padding:clamp(2rem,6vw,4.5rem) 0 clamp(1.5rem,4vw,2.5rem);border-bottom:2px solid var(--ink);}
+  @media(max-width:720px){.hero{grid-template-columns:1fr;}}
+  h1{font-size:clamp(2.1rem,6vw,3.6rem);line-height:1.03;font-weight:600;letter-spacing:-.018em;text-wrap:balance;margin:.7rem 0 0;}
+  h1 .thin{color:var(--ink-soft);font-weight:400;font-style:italic;}
+  .lede{font-size:clamp(1.05rem,2.4vw,1.3rem);color:var(--ink-soft);max-width:34ch;margin:1.1rem 0 1.7rem;}
+  .hero-cta{display:flex;gap:.7rem;flex-wrap:wrap;}
+  .seal{width:150px;height:150px;border-radius:50%;display:grid;place-content:center;text-align:center;
+    font-family:var(--sans);color:#fff;transform:rotate(-7deg);justify-self:center;
+    background:radial-gradient(circle at 38% 32%,#b8412f,var(--seal) 46%,var(--seal-deep));
+    box-shadow:0 14px 34px -12px rgba(126,32,22,.75),0 1px 2px rgba(0,0,0,.3) inset;border:3px solid rgba(255,255,255,.22);
+    animation:stamp .6s cubic-bezier(.2,1.3,.5,1) .2s both;}
+  .seal .w{font-size:1.15rem;font-weight:700;letter-spacing:.05em;}
+  .seal .t{font-size:.66rem;letter-spacing:.16em;opacity:.85;margin-top:3px;}
+  .seal .r{font-size:.56rem;letter-spacing:.2em;opacity:.72;margin-top:7px;text-transform:uppercase;}
+  @keyframes stamp{0%{opacity:0;transform:rotate(-7deg) scale(2);}60%{opacity:1;}100%{opacity:1;transform:rotate(-7deg) scale(1);}}
+
+  section{padding:clamp(2rem,5vw,3.4rem) 0;}
+  h2{font-size:clamp(1.4rem,3.2vw,1.9rem);font-weight:600;letter-spacing:-.01em;margin:0 0 .4rem;text-wrap:balance;}
+  .sub{color:var(--ink-soft);max-width:60ch;margin:0 0 1.6rem;}
+
+  /* invariant callout */
+  .invariant{background:var(--card);border:1px solid var(--hairline);border-left:5px solid var(--legal);
+    border-radius:4px;padding:1.4rem 1.6rem;display:flex;gap:1.2rem;align-items:flex-start;flex-wrap:wrap;}
+  .invariant .big{font-size:1.15rem;max-width:52ch;}
+  .invariant b{color:var(--legal);}
+
+  /* pipeline */
+  .pipe{display:flex;gap:.6rem;align-items:stretch;overflow-x:auto;padding-bottom:.5rem;}
+  .step{flex:1 0 150px;background:var(--card);border:1px solid var(--hairline);border-radius:4px;padding:1rem 1.05rem;position:relative;}
+  .step .n{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);}
+  .step h3{font-family:var(--sans);font-size:.86rem;margin:.35rem 0 .35rem;letter-spacing:.01em;}
+  .step p{font-size:.82rem;color:var(--ink-soft);margin:0;}
+  .step.sealed{border-color:#a9c4b6;} .step.sealed .n{color:var(--sealed);}
+  .arrow{align-self:center;color:var(--ink-faint);font-size:1.1rem;flex:0 0 auto;}
+  @media(max-width:720px){.arrow{display:none;}}
+
+  /* two agents */
+  .agents{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;}
+  @media(max-width:640px){.agents{grid-template-columns:1fr;}}
+  .agent{background:var(--card);border:1px solid var(--hairline);border-radius:5px;padding:1.5rem 1.6rem;}
+  .agent .tag{font-family:var(--sans);font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:#fff;background:var(--legal);
+    padding:.25rem .55rem;border-radius:3px;display:inline-block;margin-bottom:.9rem;}
+  .agent.mentor .tag{background:var(--sealed);}
+  .agent h3{font-size:1.15rem;margin:0 0 .5rem;}
+  .agent p{color:var(--ink-soft);font-size:.96rem;margin:0 0 1.1rem;}
+
+  /* guide */
+  .guide{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem 2rem;}
+  @media(max-width:640px){.guide{grid-template-columns:1fr;}}
+  .g{display:flex;gap:1rem;align-items:flex-start;}
+  .g .num{font-family:var(--serif);font-size:1.6rem;color:var(--legal);font-weight:600;line-height:1;flex:none;width:1.6rem;text-align:right;}
+  .g h3{font-family:var(--sans);font-size:.98rem;margin:.1rem 0 .3rem;}
+  .g p{margin:0;font-size:.92rem;color:var(--ink-soft);}
+  .g code{font-family:var(--mono);font-size:.86em;background:rgba(35,66,94,.08);padding:.05em .3em;border-radius:3px;}
+
+  /* stack */
+  .stack{display:flex;flex-wrap:wrap;gap:.55rem;}
+  .stack span{font-family:var(--mono);font-size:.8rem;color:var(--ink);background:#fff;border:1px solid var(--hairline);
+    border-radius:3px;padding:.4rem .7rem;}
+  .stack span b{color:var(--legal);font-weight:600;}
+
+  footer{border-top:2px solid var(--ink);padding:2rem 0 3rem;color:var(--ink-faint);font-family:var(--sans);font-size:.72rem;line-height:1.6;}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;}}
+</style>
+</head>
+<body>
+<nav class="top">
+  <div class="brand">VIGÍA<span>.</span></div>
+  <div class="links">
+    <a class="btn ghost" href="/exhibit">Live exhibit</a>
+    <a class="btn ghost" href="/consult">Mentor console</a>
+    <a class="btn ghost" href="/health">API health</a>
+  </div>
+</nav>
+
+<div class="wrap">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Live Purple Team &middot; Deterministic DFIR</p>
+      <h1>Forensic verdicts <span class="thin">a court could trust</span> — in real time.</h1>
+      <p class="lede">VIGÍA analyzes an attack as it unfolds and seals a reproducible, MITRE-mapped verdict. The AI guides the investigation; it never decides it.</p>
+      <div class="hero-cta">
+        <a class="btn primary" href="/exhibit">Open the live exhibit &rarr;</a>
+        <a class="btn ghost" href="/consult">Ask the mentor</a>
+      </div>
+    </div>
+    <div class="seal" aria-hidden="true">
+      <div><div class="w">SEALED</div><div class="t">SHA-256</div><div class="r">reproducible</div></div>
+    </div>
+  </header>
+
+  <section>
+    <div class="invariant">
+      <div class="big">The one invariant: <b>the language model is out of the decision path.</b> The deterministic engine produces and seals the verdict <i>before</i> any model describes it. Swap the narrator — Gemini, another model, none at all — and the verdict, its score, and its hash never change. That is what makes the result reproducible bit-for-bit, and defensible.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <p class="sub">Live endpoint telemetry is frozen into sealed evidence windows, adjudicated by a deterministic core, and chained into a tamper-evident record. Re-running the same windows reproduces every seal.</p>
+    <div class="pipe">
+      <div class="step"><div class="n">01</div><h3>Hunt</h3><p>Curated Velociraptor VQL collects endpoint telemetry. No raw queries — only vetted hunts.</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="step sealed"><div class="n">02 · sealed</div><h3>Evidence window</h3><p>Telemetry is frozen into an immutable, SHA-256-sealed window with full chain of custody.</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="step"><div class="n">03</div><h3>Adjudicate</h3><p>The deterministic core scores it — no floats, no model — and maps findings to MITRE ATT&amp;CK.</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="step sealed"><div class="n">04 · sealed</div><h3>Verdict chain</h3><p>Each verdict is sealed onto the previous one. Tamper with any link and verification fails.</p></div>
+      <div class="arrow">&rarr;</div>
+      <div class="step"><div class="n">05</div><h3>Narrate</h3><p>The agent explains the sealed verdict to the examiner — exactly, never altering it.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Two agents, one rule</h2>
+    <p class="sub">Both are built on Google's Agent Development Kit and Gemini. Both act and explain; neither decides. The verdict is always the sealed engine's.</p>
+    <div class="agents">
+      <div class="agent">
+        <span class="tag">Investigator</span>
+        <h3>Drives the hunt</h3>
+        <p>Chooses which hunts to run, decides when to freeze and adjudicate a window, and narrates the sealed result to the examiner. It cannot pass a score or a hash — the tools give it no way to touch the verdict.</p>
+        <a class="btn ghost" href="/exhibit">Open the live exhibit &rarr;</a>
+      </div>
+      <div class="agent mentor">
+        <span class="tag">Mentor</span>
+        <h3>Guides junior examiners</h3>
+        <p>A patient advisor for junior peritos: explains DFIR methodology, MITRE techniques, and what each verdict state means — grounded in real knowledge, never invented. It teaches you to reason; it never concludes for you.</p>
+        <a class="btn ghost" href="/consult">Ask the mentor &rarr;</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Using it</h2>
+    <p class="sub">A five-minute tour of the live exhibit.</p>
+    <div class="guide">
+      <div class="g"><div class="num">1</div><div><h3>Run a sealed investigation</h3><p>On the <a href="/exhibit">exhibit</a>, press <b>Run sealed investigation</b>. VIGÍA freezes evidence windows and seals a verdict for each. Or press <b>Ask the agent</b> to let Gemini drive and narrate.</p></div></div>
+      <div class="g"><div class="num">2</div><div><h3>Read the verdict &amp; custody</h3><p>Each window shows its sealed state, exact score (a fraction, never a float), MITRE techniques, and the chain of custody — <code>prev → window → entry</code> hashes.</p></div></div>
+      <div class="g"><div class="num">3</div><div><h3>Replay to prove it</h3><p>Press <b>Replay &amp; re-verify seals</b>. VIGÍA re-derives every seal from the recorded windows and confirms <code>HASHES MATCH</code>. Determinism, demonstrated.</p></div></div>
+      <div class="g"><div class="num">4</div><div><h3>Consult the mentor</h3><p>Not sure what a verdict means or how to proceed? The <a href="/consult">mentor console</a> explains it — and reminds you that an honest <i>ABSTAIN</i> beats a confident wrong answer.</p></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Built on</h2>
+    <div class="stack">
+      <span><b>Gemini</b> via Vertex AI</span>
+      <span><b>ADK</b> — Agent Development Kit</span>
+      <span><b>Cloud Run</b></span>
+      <span><b>Velociraptor</b> live telemetry</span>
+      <span><b>MITRE ATT&amp;CK</b> v14.1</span>
+      <span>Deterministic core &middot; <b>no floats, no LLM</b></span>
+      <span>SHA-256 sealed &middot; <b>reproducible</b></span>
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap">
+    VIGÍA &middot; Live purple-team forensics &middot; the deterministic engine decides, the agent guides.<br>
+    The verdict is sealed before any model speaks — reproducible, MITRE-mapped, tamper-evident.
+  </div>
+</footer>
+</body>
+</html>

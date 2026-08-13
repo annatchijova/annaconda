@@ -90,8 +90,14 @@ class InvestigateRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @app.get("/", include_in_schema=False)
+def home() -> FileResponse:
+    """Landing page — what VIGIA is, how it works, and how to use it."""
+    return FileResponse(STATIC_DIR / "home.html")
+
+
+@app.get("/exhibit", include_in_schema=False)
 def dashboard() -> FileResponse:
-    """The court-exhibit dashboard — opening the service URL shows the live UI."""
+    """The court-exhibit dashboard — run a live sealed investigation."""
     return FileResponse(STATIC_DIR / "index.html")
 
 
