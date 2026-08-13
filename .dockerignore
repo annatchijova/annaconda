@@ -1,0 +1,15 @@
+.git
+.gitignore
+**/__pycache__
+*.pyc
+.pytest_cache
+*.bak
+scratch/
+# The Velociraptor binary is large and reproducible via setup script; the
+# service talks to Velociraptor over its API, it does not embed it.
+tools/velociraptor/velociraptor-*
+!tools/velociraptor/velociraptor-*.sig
+# Design prototypes and local artifacts.
+*_bundle.json
+*_bundle.json.sha256
+*_reasoning_trace.json

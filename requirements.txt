@@ -1,0 +1,7 @@
+# Service (Cloud Run) dependencies. The deterministic forensic CORE is
+# stdlib-only by design; these are the web + agent layer on top of it.
+fastapi==0.136.3
+uvicorn[standard]==0.47.0
+sse-starlette==3.4.4
+google-adk==2.1.0
+google-genai==1.75.0
