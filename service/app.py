@@ -26,7 +26,7 @@ from tempfile import mkdtemp
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from agent.purple_team_agent import model_id
@@ -36,6 +36,7 @@ from tools.velociraptor.adapter import MockTransport
 from tools.velociraptor.vql_templates import TEMPLATES
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 DEMO_EVIDENCE = Path(
     os.environ.get("VIGIA_DEMO_EVIDENCE",
                    str(REPO_ROOT / "tests" / "fixtures" / "velociraptor")))
@@ -87,6 +88,12 @@ class InvestigateRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # routes
 # ---------------------------------------------------------------------------
+
+@app.get("/", include_in_schema=False)
+def dashboard() -> FileResponse:
+    """The court-exhibit dashboard — opening the service URL shows the live UI."""
+    return FileResponse(STATIC_DIR / "index.html")
+
 
 @app.get("/health")
 def health() -> dict:

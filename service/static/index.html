@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VIGIA — Live Purple Team</title>
+<style>
+  :root {
+    --paper:#eef0f1; --paper-deep:#e4e7e8; --card:#f7f8f8;
+    --ink:#191d21; --ink-soft:#5a646c; --ink-faint:#8b949a;
+    --hairline:#c9d0d2; --hairline-2:#dbe0e1;
+    --legal:#23425e; --seal:#9e2b1e; --seal-deep:#7e2016; --sealed:#2e664b; --amber:#8a6410;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:radial-gradient(120% 80% at 50% -10%,#f4f5f6 0%,var(--paper) 42%,var(--paper-deep) 100%);
+    color:var(--ink);font-family:var(--serif);line-height:1.5;-webkit-font-smoothing:antialiased;
+    padding:clamp(1rem,4vw,3rem) 1rem 4rem;}
+  .exhibit{max-width:980px;margin:0 auto;background:var(--card);border:1px solid var(--hairline);
+    box-shadow:0 1px 0 #fff inset,0 24px 60px -32px rgba(24,40,60,.38);position:relative;}
+  .exhibit::before{content:"";position:absolute;inset:0 auto 0 0;width:5px;background:linear-gradient(var(--legal),#16324a);}
+  header.masthead{display:grid;grid-template-columns:1fr auto;gap:1.5rem;align-items:start;
+    padding:clamp(1.4rem,3.5vw,2.4rem) clamp(1.5rem,4vw,3rem) 1.3rem;border-bottom:2px solid var(--ink);}
+  .eyebrow{font-family:var(--sans);font-size:.66rem;letter-spacing:.32em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 .5rem;}
+  h1{font-size:clamp(1.6rem,4vw,2.3rem);line-height:1.06;font-weight:600;letter-spacing:-.012em;text-wrap:balance;margin:0;}
+  h1 .thin{color:var(--ink-soft);font-weight:400;font-style:italic;}
+  .case-meta{font-family:var(--mono);font-size:.76rem;color:var(--ink-soft);margin-top:.85rem;
+    display:flex;flex-wrap:wrap;gap:.35rem 1.3rem;font-variant-numeric:tabular-nums;}
+  .case-meta b{color:var(--ink);font-weight:600;}
+  .seal{width:104px;height:104px;flex:none;border-radius:50%;display:grid;place-content:center;text-align:center;
+    font-family:var(--sans);color:#fff;transform:rotate(-7deg);
+    background:radial-gradient(circle at 38% 32%,#3e8467,var(--sealed) 46%,#1f4d38);
+    box-shadow:0 8px 20px -8px rgba(31,77,56,.8),0 1px 2px rgba(0,0,0,.3) inset;border:2px solid rgba(255,255,255,.22);
+    opacity:.35;transition:opacity .3s;}
+  .seal.active{opacity:1;animation:stamp .5s cubic-bezier(.2,1.3,.5,1) both;}
+  .seal.malice{background:radial-gradient(circle at 38% 32%,#b8412f,var(--seal) 46%,var(--seal-deep));
+    box-shadow:0 8px 20px -8px rgba(126,32,22,.8),0 1px 2px rgba(0,0,0,.3) inset;}
+  .seal .w{font-size:.92rem;font-weight:700;letter-spacing:.05em;}
+  .seal .t{font-size:.58rem;letter-spacing:.18em;opacity:.85;margin-top:2px;}
+  .seal .r{font-size:.48rem;letter-spacing:.2em;opacity:.7;margin-top:5px;text-transform:uppercase;}
+  @keyframes stamp{0%{opacity:0;transform:rotate(-7deg) scale(2);}60%{opacity:1;}100%{opacity:1;transform:rotate(-7deg) scale(1);}}
+  .controls{display:flex;flex-wrap:wrap;gap:.7rem;align-items:center;padding:1rem clamp(1.5rem,4vw,3rem);
+    border-bottom:1px solid var(--hairline);background:linear-gradient(var(--card),#eef1f1);}
+  .controls label{font-family:var(--sans);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);}
+  .controls input{font-family:var(--mono);font-size:.82rem;padding:.5rem .6rem;border:1px solid var(--hairline);
+    border-radius:3px;background:#fff;color:var(--ink);width:11rem;}
+  button{appearance:none;cursor:pointer;font-family:var(--sans);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;
+    border:0;border-radius:3px;padding:.62rem 1.2rem;transition:background .18s,transform .08s,opacity .18s;}
+  button.primary{color:#fff;background:var(--legal);}
+  button.primary:hover{background:#16324a;}
+  button.ghost{color:var(--legal);background:#fff;border:1px solid var(--hairline);}
+  button.ghost:hover{background:#eef1f4;}
+  button:active{transform:translateY(1px);}
+  button[disabled]{opacity:.5;cursor:default;}
+  button:focus-visible{outline:2px solid var(--seal);outline-offset:2px;}
+  .spinner{margin-left:auto;font-family:var(--mono);font-size:.76rem;color:var(--amber);}
+  .timeline{display:flex;flex-wrap:wrap;padding:0 clamp(1.5rem,4vw,3rem);border-bottom:1px solid var(--hairline);min-height:1px;}
+  .win{appearance:none;background:none;border:0;border-bottom:3px solid transparent;cursor:pointer;
+    font-family:var(--sans);padding:.85rem 1.1rem .95rem;display:flex;flex-direction:column;gap:.3rem;
+    color:var(--ink-soft);position:relative;transition:color .18s,border-color .18s,background .18s;}
+  .win:hover{color:var(--ink);background:rgba(35,66,94,.05);}
+  .win[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--legal);}
+  .win .s{font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;}
+  .win .st{font-family:var(--mono);font-size:.72rem;}
+  .win .dot{position:absolute;top:.6rem;right:.7rem;width:8px;height:8px;border-radius:50%;}
+  .dot.benign{background:var(--sealed);} .dot.malice{background:var(--seal);}
+  .body{padding:clamp(1.4rem,4vw,2.4rem) clamp(1.5rem,4vw,3rem);display:grid;grid-template-columns:1.25fr 1fr;gap:clamp(1.5rem,4vw,2.6rem);}
+  @media(max-width:720px){.body{grid-template-columns:1fr;}}
+  .fl{font-family:var(--sans);font-size:.64rem;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 .5rem;}
+  .vstate{font-size:clamp(1.7rem,4.6vw,2.5rem);font-weight:600;letter-spacing:-.01em;line-height:1;}
+  .vstate.malice{color:var(--seal);} .vstate.benign{color:var(--sealed);} .vstate.other{color:var(--legal);}
+  .metrics{display:flex;gap:2rem;margin-top:1.6rem;}
+  .metric .val{font-family:var(--mono);font-size:1.4rem;font-variant-numeric:tabular-nums;color:var(--ink);}
+  .metric .val small{color:var(--ink-faint);font-size:.78rem;}
+  .attack{margin-top:1.7rem;}
+  .ttp{display:flex;flex-wrap:wrap;gap:.5rem;}
+  .ttp span{font-family:var(--mono);font-size:.76rem;padding:.26rem .55rem;border:1px solid #d9b3ad;background:#fbf1ef;color:var(--seal);border-radius:2px;}
+  .ttp.empty span{color:var(--ink-faint);font-style:italic;font-family:var(--serif);border:1px dashed var(--hairline);background:none;}
+  .narrative{margin-top:1.5rem;padding-top:1.3rem;border-top:1px solid var(--hairline-2);font-size:.96rem;max-width:48ch;white-space:pre-wrap;}
+  .narrative .sn{font-family:var(--sans);font-size:.66rem;letter-spacing:.04em;color:var(--ink-faint);margin-top:.8rem;text-transform:uppercase;}
+  .custody{background:#fbfcfc;border:1px solid var(--hairline);border-radius:3px;padding:1.2rem 1.3rem;align-self:start;}
+  .chain{list-style:none;margin:1rem 0 0;padding:0;}
+  .chain li{position:relative;padding:0 0 1.4rem 1.6rem;}
+  .chain li:last-child{padding-bottom:0;}
+  .chain li::before{content:"";position:absolute;left:3px;top:4px;width:9px;height:9px;border-radius:50%;background:var(--card);border:2px solid var(--sealed);}
+  .chain li.m::before{border-color:var(--seal);}
+  .chain li::after{content:"";position:absolute;left:7px;top:15px;bottom:0;width:2px;background:var(--hairline);}
+  .chain li:last-child::after{display:none;}
+  .chain .k{font-family:var(--sans);font-size:.58rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);}
+  .chain .h{font-family:var(--mono);font-size:.8rem;color:var(--ink);font-variant-numeric:tabular-nums;word-break:break-all;}
+  .chain .v{font-family:var(--sans);font-size:.64rem;color:var(--sealed);display:inline-flex;gap:.3rem;margin-top:.15rem;}
+  .replay{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;
+    padding:1.1rem clamp(1.5rem,4vw,3rem);border-top:2px solid var(--ink);background:linear-gradient(#eef1f1,var(--card));}
+  .rs{font-family:var(--mono);font-size:.86rem;color:var(--ink-soft);font-variant-numeric:tabular-nums;}
+  .rs .ok{color:var(--sealed);font-weight:600;} .rs .work{color:var(--amber);} .rs .bad{color:var(--seal);font-weight:600;}
+  .empty-note{padding:2.5rem clamp(1.5rem,4vw,3rem);color:var(--ink-faint);font-style:italic;text-align:center;}
+  .foot{max-width:980px;margin:1.1rem auto 0;font-family:var(--sans);font-size:.66rem;color:var(--ink-faint);text-align:center;letter-spacing:.02em;line-height:1.5;}
+  @media(prefers-reduced-motion:reduce){*{animation-duration:.001s!important;}}
+</style>
+</head>
+<body>
+<main class="exhibit">
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">VIGIA &middot; Live Purple Team &middot; Forensic Exhibit</p>
+      <h1>Sealed verdict over <span class="thin">live endpoint telemetry</span></h1>
+      <div class="case-meta">
+        <span>CASE&nbsp; <b id="mCase">—</b></span>
+        <span>HOST&nbsp; <b>WIN11-VICTIM</b></span>
+        <span>EXAMINER&nbsp; <b id="mExam">purple-op-01</b></span>
+        <span>ENGINE&nbsp; <b id="mModel">—</b></span>
+      </div>
+    </div>
+    <div class="seal" id="seal" aria-hidden="true">
+      <div><div class="w" id="sealW">SEAL</div><div class="t" id="sealT"></div><div class="r">sha-256</div></div>
+    </div>
+  </header>
+
+  <div class="controls">
+    <label for="caseId">Case</label>
+    <input id="caseId" value="DEMO-001" spellcheck="false">
+    <button class="primary" id="runBtn">Run sealed investigation</button>
+    <button class="ghost" id="agentBtn">Ask the agent</button>
+    <span class="spinner" id="spin"></span>
+  </div>
+
+  <nav class="timeline" id="timeline" role="tablist" aria-label="Evidence windows"></nav>
+
+  <section class="body" id="bodyPanel" hidden>
+    <div class="left">
+      <p class="fl">Adjudicated verdict</p>
+      <div class="vstate" id="vState">—</div>
+      <div class="metrics">
+        <div class="metric"><p class="fl">Score</p><div class="val" id="vScore">—</div></div>
+        <div class="metric"><p class="fl">Confidence</p><div class="val" id="vConf">—</div></div>
+      </div>
+      <div class="attack"><p class="fl">MITRE ATT&amp;CK</p><div class="ttp empty" id="vTtp"><span>none corroborated</span></div></div>
+      <div class="narrative" id="vNarr" hidden></div>
+    </div>
+    <aside class="custody">
+      <p class="fl">Chain of custody</p>
+      <ol class="chain" id="chain"></ol>
+    </aside>
+  </section>
+
+  <div class="empty-note" id="emptyNote">Run an investigation to freeze evidence windows and seal their verdicts.</div>
+
+  <footer class="replay">
+    <div class="rs" id="replayStatus">No sealed chain yet.</div>
+    <button class="ghost" id="replayBtn" disabled>Replay &amp; re-verify seals</button>
+  </footer>
+</main>
+<p class="foot">Determinism is the claim: re-verifying the recorded windows reproduces every seal. Swap the narrator and the verdict never changes &mdash; the model is out of the decision path.</p>
+
+<script>
+const $=id=>document.getElementById(id);
+let STATE={inv:null};
+
+function stateClass(s){ if(s.startsWith("MALICE"))return"malice"; if(s.startsWith("BENIGN"))return"benign"; return"other"; }
+
+async function health(){
+  try{ const h=await (await fetch("/health")).json(); $("mModel").textContent=h.model+(h.vertex_ai?" · Vertex AI":""); }catch(e){}
+}
+
+async function investigate(mode){
+  const caseId=$("caseId").value.trim()||"DEMO-001";
+  $("mCase").textContent=caseId;
+  setBusy(true, mode==="agent"?"agent investigating (Gemini)…":"sealing windows…");
+  try{
+    const payload={case_id:caseId,examiner_id:"purple-op-01",mode};
+    if(mode==="agent") payload.prompt="Run a baseline sweep of processes and network as one window, then adjudicate it. Report the sealed verdict.";
+    const r=await fetch("/investigate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    if(!r.ok){ throw new Error("HTTP "+r.status); }
+    STATE.inv=await r.json();
+    render();
+  }catch(e){
+    $("replayStatus").innerHTML='<span class="bad">Investigation failed: '+e.message+'</span>';
+  }finally{ setBusy(false,""); }
+}
+
+function setBusy(b,msg){ $("spin").textContent=b?msg:""; $("runBtn").disabled=b; $("agentBtn").disabled=b; }
+
+function render(){
+  const inv=STATE.inv; if(!inv||!inv.verdicts.length){ return; }
+  $("emptyNote").hidden=true; $("bodyPanel").hidden=false;
+  // timeline
+  const tl=$("timeline"); tl.innerHTML="";
+  inv.verdicts.forEach((v,i)=>{
+    const cls=stateClass(v.verdict_state);
+    const b=document.createElement("button");
+    b.className="win"; b.setAttribute("role","tab"); b.setAttribute("aria-selected", i===inv.verdicts.length-1?"true":"false");
+    b.dataset.i=i;
+    b.innerHTML='<span class="dot '+cls+'"></span><span class="s">Window '+String(v.sequence).padStart(2,"0")+'</span><span class="st">'+v.verdict_state+'</span>';
+    b.onclick=()=>{ document.querySelectorAll(".win").forEach(w=>w.setAttribute("aria-selected","false")); b.setAttribute("aria-selected","true"); showWindow(i); };
+    tl.appendChild(b);
+  });
+  showWindow(inv.verdicts.length-1);
+  // replay ready
+  $("replayBtn").disabled=false;
+  const n=inv.verdicts.length;
+  $("replayStatus").innerHTML='Chain sealed &middot; '+n+' window'+(n>1?'s':'')+' &middot; <span class="ok">integrity '+(inv.chain.chain_ok?'verified ✓':'BROKEN ✗')+'</span>';
+}
+
+function showWindow(i){
+  const inv=STATE.inv, v=inv.verdicts[i], cls=stateClass(v.verdict_state), malice=cls==="malice";
+  const seal=$("seal"); seal.className="seal active"+(malice?" malice":"");
+  void seal.offsetWidth; seal.classList.add("active");
+  $("sealW").textContent=malice?"MALICE":(cls==="benign"?"BENIGN":"ABSTAIN");
+  $("sealT").textContent=v.verdict_state.split("_")[1]||"";
+  const vs=$("vState"); vs.textContent=v.verdict_state.replace("_"," "); vs.className="vstate "+cls;
+  $("vScore").innerHTML=v.score+' <small>exact</small>';
+  $("vConf").innerHTML=v.confidence+' <small>frac</small>';
+  const ttp=$("vTtp"), techs=v.mitre_techniques||[];
+  if(techs.length){ ttp.className="ttp"; ttp.innerHTML=techs.map(t=>'<span>'+t+'</span>').join(""); }
+  else{ ttp.className="ttp empty"; ttp.innerHTML='<span>none corroborated</span>'; }
+  // narration (agent mode)
+  const nn=$("vNarr");
+  if(inv.narration){ nn.hidden=false; nn.textContent=inv.narration; nn.innerHTML+='<div class="sn">Narrative stored beside the seal — never inside it</div>'; }
+  else{ nn.hidden=true; }
+  // custody chain from stream entry
+  const entry=inv.stream[i]||{};
+  const rows=[
+    ["prev entry",(entry.prev_entry_hash||"").slice(0,24)+"…",false],
+    ["window hash",(entry.window_hash||"").slice(0,24)+"…",true],
+    ["entry hash (sealed)",(entry.entry_hash||"").slice(0,24)+"…",true],
+  ];
+  $("chain").innerHTML=rows.map((r,j)=>'<li'+(malice&&j===2?' class="m"':'')+'><span class="k">'+r[0]+'</span><br><span class="h">'+r[1]+'</span>'+(r[2]?'<br><span class="v">✓ verified</span>':'')+'</li>').join("");
+}
+
+async function replay(){
+  const inv=STATE.inv; if(!inv) return;
+  $("replayBtn").disabled=true;
+  const rs=$("replayStatus"); const n=inv.verdicts.length;
+  for(let k=0;k<n;k++){ rs.innerHTML='Re-verifying window '+String(k).padStart(2,"0")+' &middot; <span class="work">deriving seal…</span>'; await sleep(650); }
+  try{
+    const r=await (await fetch("/investigations/"+inv.investigation_id+"/stream")).json();
+    if(r.chain_ok){ rs.innerHTML='Replay complete &middot; <span class="ok">'+n+'/'+n+' seals reproduced — HASHES MATCH ✓</span>'; }
+    else{ rs.innerHTML='<span class="bad">Replay MISMATCH — chain integrity failed</span>'; }
+  }catch(e){ rs.innerHTML='<span class="bad">Replay error: '+e.message+'</span>'; }
+  $("replayBtn").disabled=false;
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+$("runBtn").onclick=()=>investigate("scripted");
+$("agentBtn").onclick=()=>investigate("agent");
+$("replayBtn").onclick=replay;
+health();
+</script>
+</body>
+</html>
