@@ -25,7 +25,7 @@ from pathlib import Path
 from tempfile import mkdtemp
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -155,6 +155,8 @@ def health() -> dict:
         "sealed_verdicts": True,
         "llm_in_decision_path": False,
         "case_store": _CASE_STORE.backend,
+        "autonomous_sweeps": _SWEEP_STATE["count"],
+        "last_sweep_utc": _SWEEP_STATE["last_utc"],
     }
 
 
@@ -443,6 +445,40 @@ def injection_demo() -> dict:
             "verdict or its hash."
         ),
     }
+
+
+# --- autonomous sweeps: runs without a human (Cloud Scheduler -> Pub/Sub) -----
+
+_SWEEP_STATE = {"count": 0, "last_utc": None, "last_swept": 0}
+
+
+@app.post("/tasks/sweep")
+async def sweep(req: Request) -> dict:
+    """Continue hunts on open cases with no human in the loop. Cloud Scheduler
+    publishes to Pub/Sub on a cron; a push subscription delivers here; each
+    open case gets one more sealed window appended to its chain. The body (a
+    Pub/Sub push envelope) is ignored — the trigger is the signal."""
+    from datetime import datetime, timezone
+    swept = []
+    for row in _CASE_STORE.list_cases():
+        # A resolved-malicious case does not need re-hunting; keep watching the rest.
+        if row.get("status") == "malice":
+            continue
+        cid = row["case_id"]
+        case = _CASE_STORE.get_case(cid)
+        if case is None:
+            continue
+        session = _session_for_case(case, "benign")
+        result = _run_scripted(session, [["pslist", "netstat"]])
+        updated = _CASE_STORE.apply_run(
+            cid, list(session._entries), result["verdicts"], session.audit_trail)
+        swept.append({"case_id": cid, "worst_verdict": updated["worst_verdict"],
+                      "sealed_verdicts": len(updated["entries"])})
+    _SWEEP_STATE["count"] += 1
+    _SWEEP_STATE["last_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _SWEEP_STATE["last_swept"] = len(swept)
+    return {"swept": len(swept), "cases": swept,
+            "autonomous_sweeps_total": _SWEEP_STATE["count"]}
 
 
 @app.get("/investigations/{inv_id}")
