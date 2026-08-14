@@ -61,7 +61,8 @@ class PurpleTeamSession:
     def __init__(self, transport: Transport, *, case_id: str, host: dict,
                  examiner_id: str, out_dir: str | Path,
                  source: str = "velociraptor",
-                 time_base: Optional[str] = None, interval_s: int = 60):
+                 time_base: Optional[str] = None, interval_s: int = 60,
+                 start_sequence: int = 0, start_prev_hash: str = GENESIS_HASH):
         if not examiner_id or not examiner_id.strip():
             raise ValueError("examiner_id is required (chain of custody)")
         self.transport = transport
@@ -77,9 +78,14 @@ class PurpleTeamSession:
         self.out_dir = Path(out_dir)
         (self.out_dir / "windows").mkdir(parents=True, exist_ok=True)
         self.stream_path = self.out_dir / "stream.jsonl"
-        self._seq = 0
+        # Chain continuation: an investigation run INTO an existing case picks
+        # up the case's next sequence number and previous seal, so the case's
+        # sealed chain stays one unbroken record across many runs — the model
+        # a forensic examiner needs (verdicts for a host accumulate over time
+        # into a single tamper-evident case).
+        self._seq = start_sequence
         self._windows: dict[str, dict] = {}
-        self._prev_entry_hash = GENESIS_HASH
+        self._prev_entry_hash = start_prev_hash
         self._entries: list[dict] = []
         self.audit_trail: list[dict] = []
 

@@ -31,7 +31,8 @@ from pydantic import BaseModel, Field
 
 from agent.purple_team_agent import model_id
 from agent.tools import PurpleTeamSession
-from core.verdict_stream import verify_stream
+from core.verdict_stream import GENESIS_HASH, verify_stream
+from service.case_store import build_case_store
 from tools.velociraptor.adapter import MockTransport
 from tools.velociraptor.vql_templates import TEMPLATES
 
@@ -55,8 +56,11 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# In-memory investigation store: {investigation_id: {...}}.
+# In-memory investigation store (one-off demo runs): {investigation_id: {...}}.
 _STORE: dict[str, dict] = {}
+
+# Durable case store (Firestore when reachable, else memory — see case_store).
+_CASE_STORE = build_case_store()
 
 
 def _transport(scenario: str = "benign"):
@@ -127,6 +131,7 @@ def health() -> dict:
         "vertex_ai": os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").upper() == "TRUE",
         "sealed_verdicts": True,
         "llm_in_decision_path": False,
+        "case_store": _CASE_STORE.backend,
     }
 
 
@@ -210,6 +215,102 @@ async def investigate(req: InvestigateRequest) -> dict:
     }
     _STORE[inv_id] = record
     return record
+
+
+# --- cases: the analyst workflow (persistent, per-host, continuing chain) ----
+
+class CaseCreateRequest(BaseModel):
+    case_id: str = Field(..., pattern=r"^[A-Za-z0-9._-]{1,128}$")
+    hostname: str = Field("WIN11-VICTIM", min_length=1, max_length=256)
+    client_id: str = Field("C.demo01", min_length=1, max_length=256)
+    examiner_id: str = Field(..., min_length=1, max_length=128)
+
+
+class CaseInvestigateRequest(BaseModel):
+    mode: str = Field("scripted", pattern=r"^(scripted|agent)$")
+    scenario: str = Field("benign", pattern=r"^(benign|attack)$")
+    hunt_groups: Optional[list[list[str]]] = None
+    prompt: Optional[str] = None
+
+
+def _session_for_case(case: dict, scenario: str) -> PurpleTeamSession:
+    """Build a session that CONTINUES the case's sealed chain: it starts at the
+    case's next sequence number and previous seal, so appending this run keeps
+    the whole case one unbroken tamper-evident record."""
+    entries = case.get("entries", [])
+    start_seq = len(entries)
+    start_prev = entries[-1]["entry_hash"] if entries else GENESIS_HASH
+    return PurpleTeamSession(
+        _transport(scenario),
+        case_id=case["case_id"],
+        host=case.get("host", {}),
+        examiner_id=case["examiner_id"],
+        out_dir=Path(mkdtemp(prefix="annaconda-case-")),
+        source="replay",
+        time_base="2026-08-12T14:10:00Z" if scenario == "attack" else "2026-08-12T14:00:00Z",
+        start_sequence=start_seq,
+        start_prev_hash=start_prev,
+    )
+
+
+@app.post("/cases")
+def create_case(req: CaseCreateRequest) -> dict:
+    if _CASE_STORE.get_case(req.case_id) is not None:
+        raise HTTPException(status_code=409, detail=f"case {req.case_id} already exists")
+    host = {"client_id": req.client_id, "hostname": req.hostname, "os": "windows"}
+    case = _CASE_STORE.create_case(req.case_id, host, req.examiner_id)
+    return {"case": case, "persistence": _CASE_STORE.backend}
+
+
+@app.get("/cases")
+def list_cases() -> dict:
+    """The fleet / queue view: cases worst-verdict first (needs attention on top)."""
+    return {"cases": _CASE_STORE.list_cases(), "persistence": _CASE_STORE.backend}
+
+
+@app.get("/cases/{case_id}")
+def get_case(case_id: str) -> dict:
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    chain = verify_stream(case.get("entries", []))
+    return {"case": case, "chain_ok": chain["chain_ok"],
+            "chain_errors": chain["errors"], "persistence": _CASE_STORE.backend}
+
+
+@app.post("/cases/{case_id}/investigate")
+async def investigate_case(case_id: str, req: CaseInvestigateRequest) -> dict:
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+
+    session = _session_for_case(case, req.scenario)
+    if req.mode == "scripted":
+        if req.hunt_groups:
+            groups = req.hunt_groups
+        elif req.scenario == "attack":
+            groups = [["pslist", "netstat"]]
+        else:
+            groups = [["pslist", "netstat"], ["process_creation_evtx"]]
+        result = _run_scripted(session, groups)
+    else:
+        prompt = req.prompt or (
+            "Investigate this endpoint: collect its processes and network "
+            "connections together as one window, then adjudicate it and report "
+            "the sealed verdict exactly, including any MITRE techniques.")
+        result = await _run_agent(session, prompt)
+
+    updated = _CASE_STORE.apply_run(
+        case_id, list(session._entries), result["verdicts"], session.audit_trail)
+    return {
+        "case_id": case_id,
+        "run_verdicts": result["verdicts"],
+        "narration": result["narration"],
+        "worst_verdict": updated["worst_verdict"],
+        "status": updated["status"],
+        "sealed_verdicts_total": len(updated["entries"]),
+        "persistence": _CASE_STORE.backend,
+    }
 
 
 @app.get("/investigations/{inv_id}")
