@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 import time
 from pathlib import Path
 from typing import Iterable, Optional, Protocol
@@ -199,6 +200,83 @@ class RestTransport:
         # File-level custody (uploaded raw files) lands in Phase 2
         # integration; until then the window's custody rests on the rows.
         return []
+
+
+class VelociraptorQueryTransport:
+    """Real transport backed by the Velociraptor binary's own VQL engine.
+
+    This is the working live-evidence path (RestTransport above was a first
+    sketch and stays unverified). Two modes, same code:
+
+    - Local (no api_config): runs VQL against THIS host. Real telemetry from a
+      real endpoint — used to prove the live pipeline without a lab.
+    - Remote (api_config set): runs VQL through a Velociraptor server's API to
+      reach enrolled clients, e.g. collect_client(client_id=..., artifacts=...).
+      Point this at the lab's api.config.yaml and annaconda investigates real
+      Windows endpoints.
+
+    ``vql_map`` maps a collection name (the template's ``artifact``) to the VQL
+    that gathers it. Velociraptor runs as an independent AGPLv3 service reached
+    over its own interface; nothing from it is embedded.
+    """
+
+    def __init__(self, binary: str, vql_map: dict, *,
+                 api_config: Optional[str] = None, timeout_s: int = 120):
+        self._binary = binary
+        self._vql_map = dict(vql_map)
+        self._api_config = api_config
+        self._timeout = timeout_s
+        self._flows: dict[str, list] = {}
+
+    def _run_vql(self, vql: str) -> list:
+        cmd = [self._binary]
+        if self._api_config:
+            cmd += ["--api_config", self._api_config]
+        # JSONL (one row per line), not JSON: Velociraptor streams results in
+        # batches and emits one JSON array PER batch, so a large result is
+        # several arrays concatenated — not parseable as a single document.
+        # JSONL sidesteps the batching entirely.
+        cmd += ["query", vql, "--format", "jsonl"]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=self._timeout)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise AdapterError(f"velociraptor query failed to run: {exc}") from exc
+        if proc.returncode != 0:
+            raise AdapterError(
+                f"velociraptor query exited {proc.returncode}: "
+                f"{proc.stderr.strip()[:400]}")
+        rows = []
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+        return rows
+
+    def collect(self, client_id: str, artifact: str, params: dict) -> str:
+        vql = self._vql_map.get(artifact)
+        if vql is None:
+            raise AdapterError(
+                f"no VQL mapped for artifact {artifact!r}; add it to vql_map")
+        rows = self._run_vql(vql)
+        flow_id = f"Q.{artifact}.{len(self._flows)}"
+        self._flows[flow_id] = rows
+        return flow_id
+
+    def flow_state(self, client_id: str, flow_id: str) -> str:
+        return "FINISHED" if flow_id in self._flows else "ERROR"
+
+    def flow_results(self, client_id: str, flow_id: str, artifact: str) -> list:
+        return self._flows.get(flow_id, [])
+
+    def manifest(self, client_id: str, flow_id: str, artifact: str) -> list:
+        rows = self._flows.get(flow_id, [])
+        data = json.dumps(rows, sort_keys=True, ensure_ascii=True).encode("utf-8")
+        return [{
+            "path": f"velociraptor/{artifact}.json",
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size_bytes": len(data),
+        }]
 
 
 # ---------------------------------------------------------------------------
