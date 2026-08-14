@@ -82,6 +82,17 @@
   .ttp.empty span{color:var(--ink-faint);font-style:italic;font-family:var(--serif);border:1px dashed var(--hairline);background:none;}
   .narrative{margin-top:1.5rem;padding-top:1.3rem;border-top:1px solid var(--hairline-2);font-size:.96rem;max-width:48ch;white-space:pre-wrap;}
   .narrative .sn{font-family:var(--sans);font-size:.66rem;letter-spacing:.04em;color:var(--ink-faint);margin-top:.8rem;text-transform:uppercase;}
+  .agentlog{padding:1.2rem clamp(1.5rem,4vw,3rem) 1.4rem;border-top:1px solid var(--hairline);background:linear-gradient(#eef1f1,var(--card));}
+  .agentlog .fl{margin-bottom:.8rem;}
+  .alog{list-style:none;margin:0;padding:0;counter-reset:step;}
+  .alog li{position:relative;padding:.5rem 0 .5rem 2.2rem;font-size:.9rem;color:var(--ink);border-bottom:1px solid var(--hairline-2);}
+  .alog li:last-child{border-bottom:0;}
+  .alog li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:.5rem;width:1.5rem;height:1.5rem;
+    border-radius:50%;background:var(--legal);color:#fff;font-family:var(--sans);font-size:.72rem;font-weight:700;display:grid;place-content:center;}
+  .alog .act{font-family:var(--mono);font-size:.82rem;color:var(--legal);font-weight:600;}
+  .alog .rsn{color:var(--ink-soft);font-style:italic;}
+  .alog b.malice{color:var(--seal);} .alog b.benign{color:var(--sealed);} .alog b.other{color:var(--legal);}
+  .alog .tt{font-family:var(--mono);font-size:.78rem;color:var(--seal);}
   .custody{background:#fbfcfc;border:1px solid var(--hairline);border-radius:3px;padding:1.2rem 1.3rem;align-self:start;}
   .chain{list-style:none;margin:1rem 0 0;padding:0;}
   .chain li{position:relative;padding:0 0 1.4rem 1.6rem;}
@@ -151,6 +162,11 @@
     </aside>
   </section>
 
+  <section class="agentlog" id="agentLog" hidden>
+    <p class="fl">Agent investigation log &middot; what the agent decided, step by step</p>
+    <ol class="alog" id="alog"></ol>
+  </section>
+
   <div class="empty-note" id="emptyNote">Run an investigation to freeze evidence windows and seal their verdicts.</div>
 
   <footer class="replay">
@@ -214,6 +230,25 @@ function render(){
   $("replayBtn").disabled=false;
   const n=inv.verdicts.length;
   $("replayStatus").innerHTML='Chain sealed &middot; '+n+' window'+(n>1?'s':'')+' &middot; <span class="ok">integrity '+(inv.chain.chain_ok?'verified ✓':'BROKEN ✗')+'</span>';
+  renderAgentLog();
+}
+
+function renderAgentLog(){
+  const inv=STATE.inv, log=$("agentLog");
+  // Show the agent's reasoning trace when the agent drove the investigation.
+  if(!inv.narration || !Array.isArray(inv.audit_trail) || !inv.audit_trail.length){ log.hidden=true; return; }
+  const steps=inv.audit_trail.filter(a=>a.action!=="verify_chain"||true).map(a=>{
+    const d=a.detail||{};
+    if(a.action==="list_available_hunts") return '<li><span class="act">list_available_hunts</span> — reviewed the curated hunts</li>';
+    if(a.action==="run_hunt") return '<li><span class="act">run_hunt</span> <b>'+(d.hunt_ids||[]).join(", ")+'</b> — <span class="rsn">'+(d.reason||"")+'</span></li>';
+    if(a.action==="run_hunt_failed") return '<li><span class="act">run_hunt</span> '+(d.hunt_ids||[]).join(", ")+' — could not collect, moved on</li>';
+    if(a.action==="adjudicate"){ const c=stateClass(d.verdict_state); const tt=(d.mitre_techniques||[]).join(" ");
+      return '<li><span class="act">adjudicate</span> → <b class="'+c+'">'+String(d.verdict_state||"").replace("_"," ")+'</b>'+(tt?' &nbsp;<span class="tt">'+tt+'</span>':'')+'</li>'; }
+    if(a.action==="verify_chain") return '<li><span class="act">verify_chain</span> → '+(d.chain_ok?'record intact ✓':'BROKEN ✗')+'</li>';
+    return '<li>'+a.action+'</li>';
+  }).join("");
+  $("alog").innerHTML=steps;
+  log.hidden=false;
 }
 
 function showWindow(i){

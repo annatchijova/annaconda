@@ -97,6 +97,24 @@ def test_full_loop_chains_and_verifies(tmp_path):
     assert actions[-1] == "verify_chain"
 
 
+def test_run_hunt_degrades_gracefully_when_a_hunt_cannot_be_collected(tmp_path):
+    """A hunt that fails to collect must return an error, not raise — a single
+    failed hunt must never crash a whole autonomous investigation."""
+    import json as _json
+    from tools.velociraptor.adapter import MockTransport
+    only_pslist = tmp_path / "fx"
+    only_pslist.mkdir()
+    (only_pslist / "Windows.System.Pslist.json").write_text(
+        _json.dumps([{"Pid": 1, "Name": "x", "CreateTime": "2026-08-12T14:00:00Z"}]))
+    s = PurpleTeamSession(
+        MockTransport(only_pslist), case_id="R", host=HOST, examiner_id="op",
+        out_dir=tmp_path / "out", source="replay", time_base="2026-08-12T14:00:00Z")
+    out = s.run_hunt(["netstat"], reason="not present here")
+    assert "error" in out and "could not be collected" in out["error"]
+    # and the session is still usable afterwards
+    assert "window_id" in s.run_hunt(["pslist"], reason="still works")
+
+
 def test_adjudicate_refuses_tampered_window(tmp_path):
     s = _session(tmp_path)
     summary = s.run_hunt(["pslist"], reason="sweep")

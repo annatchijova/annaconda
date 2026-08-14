@@ -30,7 +30,7 @@ from core.verdict_stream import (
     GENESIS_HASH, append_entry, build_stream_entry, verify_stream,
 )
 from tools.velociraptor.adapter import (
-    Transport, collect_window, verify_window, window_to_case,
+    AdapterError, Transport, collect_window, verify_window, window_to_case,
 )
 from tools.velociraptor.vql_templates import TEMPLATES
 
@@ -147,12 +147,18 @@ class PurpleTeamSession:
 
         requests = [(h, _DEFAULT_PARAMS.get(h, {})) for h in hunt_ids]
         start, end = self._window_span()
-        window, reports = collect_window(
-            self.transport, case_id=self.case_id, sequence=self._seq,
-            source=self.source, host=self.host,
-            time_start_utc=start, time_end_utc=end,
-            examiner_id=self.examiner_id, requests=requests,
-        )
+        try:
+            window, reports = collect_window(
+                self.transport, case_id=self.case_id, sequence=self._seq,
+                source=self.source, host=self.host,
+                time_start_utc=start, time_end_utc=end,
+                examiner_id=self.examiner_id, requests=requests,
+            )
+        except AdapterError as exc:
+            # A hunt that cannot be collected must not crash the investigation
+            # — the agent gets a plain error and can try a different hunt.
+            self._audit("run_hunt_failed", {"hunt_ids": hunt_ids, "error": str(exc)})
+            return {"error": f"hunt {hunt_ids} could not be collected: {exc}"}
         window_path = self.out_dir / "windows" / f"window-{self._seq:06d}.json"
         window_path.write_text(
             json.dumps(window, sort_keys=True, ensure_ascii=True, indent=1),
