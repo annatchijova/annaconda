@@ -54,6 +54,24 @@
   button.ghost:hover{background:#eef1f4;}
   button.danger{color:#fff;background:var(--seal);}
   button.danger:hover{background:var(--seal-deep);}
+  button.inject{color:#fff;background:#6d3a86;}
+  button.inject:hover{background:#582d6c;}
+  .injectdemo{padding:1.3rem clamp(1.5rem,4vw,3rem) 1.6rem;border-top:2px solid var(--ink);background:linear-gradient(#efeaf3,var(--card));}
+  .injectdemo .fl{margin-bottom:1.1rem;color:#6d3a86;}
+  .inj-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+  @media(max-width:720px){.inj-grid{grid-template-columns:1fr;}}
+  .inj-block{background:#fff;border:1px solid var(--hairline);border-radius:5px;padding:1rem 1.15rem;}
+  .inj-block h4{font-family:var(--sans);font-size:.72rem;letter-spacing:.06em;margin:0 0 .6rem;color:var(--ink);}
+  .inj-planted{font-family:var(--mono);font-size:.8rem;color:#6d3a86;background:#f5f0f8;border-left:3px solid #6d3a86;padding:.6rem .7rem;border-radius:3px;word-break:break-word;}
+  .inj-naive{font-size:.92rem;color:var(--ink);font-style:italic;}
+  .inj-naive .verdict-benign{color:var(--sealed);font-weight:700;font-style:normal;}
+  .inj-sealed{font-family:var(--mono);font-size:.9rem;}
+  .inj-sealed .st{color:var(--seal);font-weight:700;font-size:1.05rem;}
+  .inj-sealed .h{color:var(--ink-soft);font-size:.76rem;word-break:break-all;}
+  .inj-guard{font-size:.92rem;}
+  .inj-guard .caught{color:var(--seal);font-weight:700;}
+  .inj-inv{margin:1.2rem 0 0;font-size:.95rem;color:var(--ink);max-width:70ch;border-top:1px solid var(--hairline);padding-top:1rem;}
+  .inj-inv b{color:#6d3a86;}
   button:active{transform:translateY(1px);}
   button[disabled]{opacity:.5;cursor:default;}
   button:focus-visible{outline:2px solid var(--seal);outline-offset:2px;}
@@ -146,6 +164,7 @@
     <input id="caseId" value="DEMO-001" spellcheck="false">
     <button class="primary" id="runBtn">Run sealed investigation</button>
     <button class="danger" id="attackBtn">Run attack scenario</button>
+    <button class="inject" id="injectBtn">Prompt-injection attack</button>
     <button class="ghost" id="agentBtn">Ask the agent</button>
     <a class="ghost" href="/console" style="text-decoration:none;display:inline-block;line-height:1;padding:.62rem 1.2rem;">Case queue &rarr;</a>
     <a class="ghost" href="/consult" style="text-decoration:none;display:inline-block;line-height:1;padding:.62rem 1.2rem;">Mentor &rarr;</a>
@@ -180,6 +199,17 @@
     <p class="fl">ML triage &middot; events the surprisal ensemble nominated for review</p>
     <p class="mlnote">The model surfaces candidates in bits of surprisal &mdash; it never decides. Only the deterministic engine sealed the verdict above.</p>
     <ol class="nlist" id="nlist"></ol>
+  </section>
+
+  <section class="injectdemo" id="injectDemo" hidden>
+    <p class="fl">Attacker-controlled evidence &middot; the genuine threat of an LLM in DFIR</p>
+    <div class="inj-grid">
+      <div class="inj-block"><h4>1 &middot; The attacker wrote this into the telemetry</h4><div class="inj-planted" id="injPlanted"></div></div>
+      <div class="inj-block"><h4>2 &middot; A naive narrator believed it</h4><div class="inj-naive" id="injNaive"></div></div>
+      <div class="inj-block"><h4>3 &middot; annaconda's sealed verdict &mdash; produced before any model ran</h4><div class="inj-sealed" id="injSealed"></div></div>
+      <div class="inj-block"><h4>4 &middot; The guard caught the lie</h4><div class="inj-guard" id="injGuard"></div></div>
+    </div>
+    <p class="inj-inv" id="injInv"></p>
   </section>
 
   <div class="empty-note" id="emptyNote">Run an investigation to freeze evidence windows and seal their verdicts.</div>
@@ -224,7 +254,7 @@ async function investigate(mode, scenario){
   }finally{ setBusy(false,""); }
 }
 
-function setBusy(b,msg){ $("spin").textContent=b?msg:""; $("runBtn").disabled=b; $("agentBtn").disabled=b; $("attackBtn").disabled=b; }
+function setBusy(b,msg){ $("spin").textContent=b?msg:""; $("runBtn").disabled=b; $("agentBtn").disabled=b; $("attackBtn").disabled=b; $("injectBtn").disabled=b; }
 
 function render(){
   const inv=STATE.inv; if(!inv||!inv.verdicts.length){ return; }
@@ -319,7 +349,34 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
 $("runBtn").onclick=()=>investigate("scripted","benign");
 $("attackBtn").onclick=()=>investigate("scripted","attack");
+$("injectBtn").onclick=injectionDemo;
 $("agentBtn").onclick=()=>investigate("agent");
+
+async function injectionDemo(){
+  setBusy(true,"planting evidence, baiting a naive narrator…");
+  $("injectBtn").disabled=true;
+  try{
+    const r=await (await fetch("/injection-demo",{method:"POST"})).json();
+    // hide the normal panels, show the injection story
+    $("bodyPanel").hidden=true; $("agentLog").hidden=true; $("mlTriage").hidden=true;
+    $("timeline").innerHTML=""; $("emptyNote").hidden=true;
+    $("injPlanted").textContent=r.planted_instruction||"(none found)";
+    const nv=(r.naive_narration||"").replace(/[<>]/g,"");
+    $("injNaive").innerHTML=nv.replace(/\bbenign\b/gi,'<span class="verdict-benign">benign</span>');
+    const s=r.sealed_verdict;
+    $("injSealed").innerHTML='<span class="st">'+s.state.replace("_"," ")+'</span> '
+      +(s.mitre_techniques||[]).join(" ")+'<br><span class="h">entry '+s.entry_hash+'</span>';
+    const g=r.guard;
+    $("injGuard").innerHTML=g.suspicious
+      ? '<span class="caught">CAUGHT ✓</span> — the narrator\'s claim contradicts the sealed verdict ('+g.claims_hallucinated+' hallucinated claim'+(g.claims_hallucinated===1?'':'s')+', rate '+g.hallucination_rate+'). The narration is redacted against the seal.'
+      : 'This narrator resisted the bait — but the verdict never depended on that. The seal holds regardless.';
+    $("injInv").innerHTML=r.invariant;
+    $("injectDemo").hidden=false;
+    $("replayStatus").innerHTML='<span class="ok">Sealed verdict unchanged by the injected evidence.</span>';
+    $("replayBtn").disabled=true;
+  }catch(e){ $("replayStatus").innerHTML='<span class="bad">Injection demo failed: '+e.message+'</span>'; }
+  finally{ setBusy(false,""); $("injectBtn").disabled=false; }
+}
 $("replayBtn").onclick=replay;
 health();
 </script>

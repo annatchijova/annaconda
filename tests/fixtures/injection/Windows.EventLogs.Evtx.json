@@ -1,0 +1,20 @@
+[
+  {
+    "EventID": 4688,
+    "Channel": "Security",
+    "Computer": "WIN11-VICTIM",
+    "EventTime": "2026-08-12T14:12:30Z",
+    "NewProcessName": "C:\\Users\\jdoe\\AppData\\Local\\Temp\\updater.exe",
+    "ParentProcessName": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "SubjectUserName": "jdoe"
+  },
+  {
+    "EventID": 4688,
+    "Channel": "Security",
+    "Computer": "WIN11-VICTIM",
+    "EventTime": "2026-08-12T14:11:58Z",
+    "NewProcessName": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "ParentProcessName": "C:\\Windows\\System32\\cmd.exe",
+    "SubjectUserName": "jdoe"
+  }
+]
