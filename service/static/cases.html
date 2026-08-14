@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>annaconda — Case Queue</title>
+<style>
+  :root{
+    --paper:#eef0f1;--paper-deep:#e4e7e8;--card:#f7f8f8;
+    --ink:#191d21;--ink-soft:#5a646c;--ink-faint:#8b949a;
+    --hairline:#c9d0d2;--hairline-2:#dbe0e1;
+    --legal:#23425e;--seal:#9e2b1e;--seal-deep:#7e2016;--sealed:#2e664b;--amber:#8a6410;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:radial-gradient(130% 90% at 50% -8%,#f5f6f7 0%,var(--paper) 40%,var(--paper-deep) 100%);
+    color:var(--ink);font-family:var(--serif);line-height:1.55;-webkit-font-smoothing:antialiased;
+    padding:clamp(1rem,4vw,2.5rem) 1rem 3rem;}
+  .wrap{max-width:1080px;margin:0 auto;}
+  nav.top{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;}
+  nav.top .brand{font-family:var(--sans);font-weight:700;letter-spacing:.12em;font-size:.9rem;}
+  nav.top .brand span{color:var(--legal);}
+  nav.top a{font-family:var(--sans);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--legal);
+    text-decoration:none;border:1px solid var(--hairline);border-radius:4px;padding:.5rem .9rem;background:#fff;margin-left:.4rem;}
+  nav.top a:hover{background:#eef1f4;}
+  .persist{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);}
+  .persist b{color:var(--sealed);}
+  .persist b.mem{color:var(--amber);}
+
+  h1{font-size:clamp(1.6rem,4vw,2.2rem);font-weight:600;letter-spacing:-.012em;margin:0 0 .3rem;}
+  .lede{color:var(--ink-soft);margin:0 0 1.6rem;max-width:60ch;}
+
+  .grid{display:grid;grid-template-columns:1.15fr 1fr;gap:1.4rem;align-items:start;}
+  @media(max-width:820px){.grid{grid-template-columns:1fr;}}
+
+  .panel{background:var(--card);border:1px solid var(--hairline);border-radius:6px;overflow:hidden;}
+  .panel > h2{font-family:var(--sans);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-soft);
+    margin:0;padding:.9rem 1.1rem;border-bottom:1px solid var(--hairline);background:linear-gradient(var(--card),#eef1f1);}
+
+  /* queue */
+  .qrow{display:grid;grid-template-columns:auto 1fr auto;gap:.8rem;align-items:center;
+    padding:.75rem 1.1rem;border-bottom:1px solid var(--hairline-2);cursor:pointer;transition:background .12s;width:100%;text-align:left;
+    border-left:0;border-right:0;border-top:0;background:none;font-family:inherit;}
+  .qrow:hover{background:rgba(35,66,94,.05);}
+  .qrow[aria-selected="true"]{background:rgba(35,66,94,.09);}
+  .qrow:last-child{border-bottom:0;}
+  .pill{font-family:var(--sans);font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    padding:.28rem .5rem;border-radius:3px;color:#fff;white-space:nowrap;}
+  .pill.malice{background:var(--seal);} .pill.benign{background:var(--sealed);}
+  .pill.abstain{background:var(--amber);} .pill.escalate{background:#6d3a86;} .pill.open{background:var(--ink-faint);}
+  .qrow .cid{font-family:var(--mono);font-size:.86rem;color:var(--ink);}
+  .qrow .host{font-size:.82rem;color:var(--ink-soft);}
+  .qrow .meta{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);text-align:right;font-variant-numeric:tabular-nums;}
+  .empty{padding:1.6rem 1.1rem;color:var(--ink-faint);font-style:italic;}
+
+  /* create */
+  .create{padding:1rem 1.1rem;border-bottom:1px solid var(--hairline);display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end;}
+  .create .f{display:flex;flex-direction:column;gap:.25rem;}
+  .create label{font-family:var(--sans);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);}
+  .create input{font-family:var(--mono);font-size:.8rem;padding:.45rem .55rem;border:1px solid var(--hairline);border-radius:3px;background:#fff;width:8.5rem;}
+  button{appearance:none;cursor:pointer;font-family:var(--sans);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;
+    border:0;border-radius:4px;padding:.55rem 1rem;transition:background .16s,opacity .16s;}
+  button.primary{background:var(--legal);color:#fff;} button.primary:hover{background:#16324a;}
+  button.ghost{background:#fff;color:var(--legal);border:1px solid var(--hairline);} button.ghost:hover{background:#eef1f4;}
+  button.danger{background:var(--seal);color:#fff;} button.danger:hover{background:var(--seal-deep);}
+  button[disabled]{opacity:.5;cursor:default;}
+
+  /* detail */
+  #detail{min-height:8rem;}
+  .dhead{padding:1.1rem 1.2rem;border-bottom:1px solid var(--hairline);}
+  .dhead .cid{font-family:var(--mono);font-size:1.1rem;color:var(--ink);}
+  .dmeta{font-family:var(--mono);font-size:.74rem;color:var(--ink-soft);margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.3rem 1.2rem;}
+  .dmeta b{color:var(--ink);}
+  .chainok{font-family:var(--sans);font-size:.72rem;margin-top:.6rem;}
+  .chainok.ok{color:var(--sealed);} .chainok.bad{color:var(--seal);}
+  .actions{padding:.9rem 1.2rem;border-bottom:1px solid var(--hairline);display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;background:#fbfcfc;}
+  .actions .spin{font-family:var(--mono);font-size:.72rem;color:var(--amber);margin-left:auto;}
+  .verdicts{padding:.6rem 0;}
+  .vrow{display:grid;grid-template-columns:auto 1fr auto;gap:.7rem;align-items:center;padding:.55rem 1.2rem;border-bottom:1px solid var(--hairline-2);}
+  .vrow:last-child{border-bottom:0;}
+  .vrow .seq{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);}
+  .vrow .st{font-family:var(--sans);font-size:.82rem;font-weight:600;}
+  .vrow .st.malice{color:var(--seal);} .vrow .st.benign{color:var(--sealed);} .vrow .st.other{color:var(--legal);}
+  .vrow .ttp{font-family:var(--mono);font-size:.72rem;color:var(--seal);}
+  .vrow .h{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);text-align:right;}
+  .placeholder{padding:2rem 1.2rem;color:var(--ink-faint);font-style:italic;text-align:center;}
+  .foot{margin-top:1.4rem;font-family:var(--sans);font-size:.66rem;color:var(--ink-faint);text-align:center;}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="top">
+    <div class="brand">annaconda<span>.</span></div>
+    <div>
+      <span class="persist" id="persist"></span>
+      <a href="/">Home</a>
+      <a href="/exhibit">Exhibit</a>
+      <a href="/consult">Mentor</a>
+    </div>
+  </nav>
+
+  <h1>Case queue</h1>
+  <p class="lede">One case per host. Verdicts accumulate into a single sealed record that reopens, hands off, and defends later. Cases that need attention rise to the top.</p>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>Cases &middot; worst first</h2>
+      <div class="create">
+        <div class="f"><label>Case id</label><input id="cId" value="IR-2026-001" spellcheck="false"></div>
+        <div class="f"><label>Host</label><input id="cHost" value="FINANCE-WS-04" spellcheck="false"></div>
+        <div class="f"><label>Examiner</label><input id="cExam" value="perito-01" spellcheck="false"></div>
+        <button class="primary" id="createBtn">Open case</button>
+      </div>
+      <div id="queue"><div class="empty">Loading…</div></div>
+    </div>
+
+    <div class="panel" id="detail">
+      <h2>Case detail</h2>
+      <div class="placeholder">Select a case to review its sealed record, or investigate its host.</div>
+    </div>
+  </div>
+  <p class="foot">Every verdict is produced and sealed by the deterministic engine. The record is tamper-evident: reordered, altered, or truncated and it fails verification.</p>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let SELECTED=null;
+
+function stCls(s){s=(s||"").toLowerCase();return s.includes("malice")?"malice":s.includes("benign")?"benign":s.includes("abstain")?"abstain":s.includes("escalate")?"escalate":"open";}
+function vCls(s){return (s||"").startsWith("MALICE")?"malice":(s||"").startsWith("BENIGN")?"benign":"other";}
+
+async function loadQueue(){
+  const r=await (await fetch("/cases")).json();
+  const back=r.persistence;
+  $("persist").innerHTML="storage: <b class='"+(back==="firestore"?"":"mem")+"'>"+back+"</b>";
+  const q=$("queue");
+  if(!r.cases.length){ q.innerHTML='<div class="empty">No cases yet. Open one above.</div>'; return; }
+  q.innerHTML="";
+  r.cases.forEach(c=>{
+    const b=document.createElement("button");
+    b.className="qrow"; b.setAttribute("role","button");
+    if(c.case_id===SELECTED) b.setAttribute("aria-selected","true");
+    const st=c.status||"open";
+    b.innerHTML='<span class="pill '+stCls(st)+'">'+st+'</span>'
+      +'<span><span class="cid">'+c.case_id+'</span><br><span class="host">'+(c.host?.hostname||"—")+' · '+(c.examiner_id||"")+'</span></span>'
+      +'<span class="meta">'+c.sealed_verdicts+' sealed<br>'+c.runs+' runs</span>';
+    b.onclick=()=>openCase(c.case_id);
+    q.appendChild(b);
+  });
+}
+
+async function openCase(id){
+  SELECTED=id;
+  document.querySelectorAll(".qrow").forEach(x=>x.setAttribute("aria-selected","false"));
+  const r=await (await fetch("/cases/"+encodeURIComponent(id))).json();
+  renderDetail(r);
+  loadQueue();
+}
+
+function renderDetail(r){
+  const c=r.case, d=$("detail");
+  const verds=(c.verdicts||[]).map((v,i)=>{
+    const techs=(v.mitre_techniques||[]).join(" ");
+    return '<div class="vrow"><span class="seq">#'+String(v.sequence).padStart(2,"0")+'</span>'
+      +'<span><span class="st '+vCls(v.verdict_state)+'">'+v.verdict_state.replace("_"," ")+'</span>'
+      +(techs?' &nbsp;<span class="ttp">'+techs+'</span>':'')+'</span>'
+      +'<span class="h">'+(v.entry_hash||"").slice(0,12)+'…</span></div>';
+  }).join("") || '<div class="placeholder">No investigations yet. Run one below.</div>';
+
+  d.innerHTML='<h2>Case detail</h2>'
+    +'<div class="dhead"><span class="cid">'+c.case_id+'</span>'
+    +'<div class="dmeta"><span>HOST <b>'+(c.host?.hostname||"—")+'</b></span>'
+    +'<span>EXAMINER <b>'+(c.examiner_id||"")+'</b></span>'
+    +'<span>RUNS <b>'+(c.runs||0)+'</b></span>'
+    +'<span>SEALED <b>'+((c.entries||[]).length)+'</b></span></div>'
+    +'<div class="chainok '+(r.chain_ok?"ok":"bad")+'">'+(r.chain_ok?"✓ chain of custody intact":"✗ CHAIN BROKEN")+'</div></div>'
+    +'<div class="actions">'
+    +'<button class="ghost" id="invBenign">Investigate (benign)</button>'
+    +'<button class="danger" id="invAttack">Investigate (attack)</button>'
+    +'<button class="ghost" id="invAgent">Ask the agent</button>'
+    +'<span class="spin" id="dspin"></span></div>'
+    +'<div class="verdicts">'+verds+'</div>';
+  $("invBenign").onclick=()=>investigate(c.case_id,"scripted","benign");
+  $("invAttack").onclick=()=>investigate(c.case_id,"scripted","attack");
+  $("invAgent").onclick=()=>investigate(c.case_id,"agent",SELECTED_SCENARIO);
+}
+let SELECTED_SCENARIO="benign";
+
+async function investigate(id,mode,scenario){
+  if(scenario) SELECTED_SCENARIO=scenario;
+  const sp=$("dspin"); if(sp) sp.textContent=mode==="agent"?"agent investigating (Gemini)…":"sealing…";
+  document.querySelectorAll(".actions button").forEach(b=>b.disabled=true);
+  try{
+    await fetch("/cases/"+encodeURIComponent(id)+"/investigate",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({mode,scenario:scenario||SELECTED_SCENARIO})});
+    await openCase(id);
+  }catch(e){ if(sp) sp.textContent="error: "+e.message; }
+}
+
+$("createBtn").onclick=async()=>{
+  const case_id=$("cId").value.trim(), hostname=$("cHost").value.trim(), examiner_id=$("cExam").value.trim();
+  if(!case_id||!examiner_id) return;
+  const r=await fetch("/cases",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({case_id,hostname,examiner_id})});
+  if(r.ok){ await loadQueue(); openCase(case_id); }
+  else{ const e=await r.json(); alert(e.detail||"could not open case"); }
+};
+
+loadQueue();
+</script>
+</body>
+</html>

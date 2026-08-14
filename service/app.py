@@ -121,6 +121,13 @@ def consult_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "consult.html")
 
 
+@app.get("/console", include_in_schema=False)
+def console_page() -> FileResponse:
+    """The analyst console — the case queue: one case per host, sealed record
+    accumulating over time. The real-work view."""
+    return FileResponse(STATIC_DIR / "cases.html")
+
+
 @app.get("/health")
 def health() -> dict:
     return {
