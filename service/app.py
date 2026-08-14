@@ -128,6 +128,12 @@ def console_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "cases.html")
 
 
+@app.get("/architecture", include_in_schema=False)
+def architecture_page() -> FileResponse:
+    """End-to-end architecture walkthrough."""
+    return FileResponse(STATIC_DIR / "architecture.html")
+
+
 @app.get("/health")
 def health() -> dict:
     return {
