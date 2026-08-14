@@ -162,3 +162,17 @@ copied/adapted (state what) or is only being used as an external
 service/tool (state how), and — for anything copied — roughly what was
 left out and why, so a reviewer never has to guess where annaconda's own
 code ends and someone else's begins.
+
+---
+
+## Ported / adapted (MIT)
+
+### Camel — surprisal-ensemble nominator
+<https://github.com/allisterb/Camel>
+
+The ML triage layer (`ml/nominator.py`) is a stdlib-Python port of the
+label-free, self-baselining surprisal-ensemble idea from Camel (C#, MIT,
+copyright 2026 Allister Beharry). Adapted to endpoint process/network
+telemetry: the rare-path, rare-destination, and content-entropy detectors are
+retained; Camel's name/type-surprisal detectors were dropped as noise for this
+data domain. The layer NOMINATES only — it never produces a sealed value.

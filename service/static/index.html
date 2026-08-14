@@ -93,6 +93,15 @@
   .alog .rsn{color:var(--ink-soft);font-style:italic;}
   .alog b.malice{color:var(--seal);} .alog b.benign{color:var(--sealed);} .alog b.other{color:var(--legal);}
   .alog .tt{font-family:var(--mono);font-size:.78rem;color:var(--seal);}
+  .mltriage{padding:1.2rem clamp(1.5rem,4vw,3rem) 1.4rem;border-top:1px solid var(--hairline);}
+  .mltriage .fl{margin-bottom:.3rem;}
+  .mlnote{font-size:.86rem;color:var(--ink-soft);font-style:italic;margin:0 0 1rem;max-width:60ch;}
+  .nlist{list-style:none;margin:0;padding:0;}
+  .nlist li{display:grid;grid-template-columns:auto auto 1fr;gap:.7rem;align-items:baseline;padding:.5rem 0;border-bottom:1px solid var(--hairline-2);}
+  .nlist li:last-child{border-bottom:0;}
+  .nlist .bits{font-family:var(--mono);font-size:.9rem;font-variant-numeric:tabular-nums;color:var(--legal);font-weight:600;white-space:nowrap;}
+  .nlist .det{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;}
+  .nlist .rsn{font-size:.9rem;color:var(--ink);}
   .custody{background:#fbfcfc;border:1px solid var(--hairline);border-radius:3px;padding:1.2rem 1.3rem;align-self:start;}
   .chain{list-style:none;margin:1rem 0 0;padding:0;}
   .chain li{position:relative;padding:0 0 1.4rem 1.6rem;}
@@ -167,6 +176,12 @@
     <ol class="alog" id="alog"></ol>
   </section>
 
+  <section class="mltriage" id="mlTriage" hidden>
+    <p class="fl">ML triage &middot; events the surprisal ensemble nominated for review</p>
+    <p class="mlnote">The model surfaces candidates in bits of surprisal &mdash; it never decides. Only the deterministic engine sealed the verdict above.</p>
+    <ol class="nlist" id="nlist"></ol>
+  </section>
+
   <div class="empty-note" id="emptyNote">Run an investigation to freeze evidence windows and seal their verdicts.</div>
 
   <footer class="replay">
@@ -231,6 +246,7 @@ function render(){
   const n=inv.verdicts.length;
   $("replayStatus").innerHTML='Chain sealed &middot; '+n+' window'+(n>1?'s':'')+' &middot; <span class="ok">integrity '+(inv.chain.chain_ok?'verified ✓':'BROKEN ✗')+'</span>';
   renderAgentLog();
+  renderTriage();
 }
 
 function renderAgentLog(){
@@ -249,6 +265,16 @@ function renderAgentLog(){
   }).join("");
   $("alog").innerHTML=steps;
   log.hidden=false;
+}
+
+function renderTriage(){
+  const inv=STATE.inv, panel=$("mlTriage");
+  if(!Array.isArray(inv.nominations)||!inv.nominations.length){ panel.hidden=true; return; }
+  $("nlist").innerHTML=inv.nominations.map(n=>
+    '<li><span class="bits">'+n.surprisal_bits+' bits</span>'
+    +'<span class="det">'+n.detector+'</span>'
+    +'<span class="rsn">'+n.reason.replace(/[<>]/g,"")+'</span></li>').join("");
+  panel.hidden=false;
 }
 
 function showWindow(i){

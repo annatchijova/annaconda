@@ -1,5 +1,14 @@
 [
   {
+    "Pid": 4,
+    "Ppid": 0,
+    "Name": "System",
+    "Exe": "",
+    "CommandLine": "",
+    "Username": "NT AUTHORITY\\SYSTEM",
+    "CreateTime": "2026-08-12T13:54:50Z"
+  },
+  {
     "Pid": 612,
     "Ppid": 512,
     "Name": "svchost.exe",
@@ -7,6 +16,69 @@
     "CommandLine": "C:\\Windows\\system32\\svchost.exe -k netsvcs -p",
     "Username": "NT AUTHORITY\\SYSTEM",
     "CreateTime": "2026-08-12T13:55:02Z"
+  },
+  {
+    "Pid": 720,
+    "Ppid": 512,
+    "Name": "lsass.exe",
+    "Exe": "C:\\Windows\\System32\\lsass.exe",
+    "CommandLine": "C:\\Windows\\system32\\lsass.exe",
+    "Username": "NT AUTHORITY\\SYSTEM",
+    "CreateTime": "2026-08-12T13:55:03Z"
+  },
+  {
+    "Pid": 988,
+    "Ppid": 612,
+    "Name": "services.exe",
+    "Exe": "C:\\Windows\\System32\\services.exe",
+    "CommandLine": "C:\\Windows\\system32\\services.exe",
+    "Username": "NT AUTHORITY\\SYSTEM",
+    "CreateTime": "2026-08-12T13:55:01Z"
+  },
+  {
+    "Pid": 1340,
+    "Ppid": 988,
+    "Name": "spoolsv.exe",
+    "Exe": "C:\\Windows\\System32\\spoolsv.exe",
+    "CommandLine": "C:\\Windows\\System32\\spoolsv.exe",
+    "Username": "NT AUTHORITY\\SYSTEM",
+    "CreateTime": "2026-08-12T13:55:20Z"
+  },
+  {
+    "Pid": 2104,
+    "Ppid": 1720,
+    "Name": "explorer.exe",
+    "Exe": "C:\\Windows\\explorer.exe",
+    "CommandLine": "C:\\Windows\\Explorer.EXE",
+    "Username": "LAB\\jdoe",
+    "CreateTime": "2026-08-12T13:58:11Z"
+  },
+  {
+    "Pid": 3320,
+    "Ppid": 2104,
+    "Name": "chrome.exe",
+    "Exe": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "CommandLine": "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\"",
+    "Username": "LAB\\jdoe",
+    "CreateTime": "2026-08-12T14:01:44Z"
+  },
+  {
+    "Pid": 3612,
+    "Ppid": 988,
+    "Name": "MsMpEng.exe",
+    "Exe": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\4.18\\MsMpEng.exe",
+    "CommandLine": "\"MsMpEng.exe\"",
+    "Username": "NT AUTHORITY\\SYSTEM",
+    "CreateTime": "2026-08-12T13:55:40Z"
+  },
+  {
+    "Pid": 4212,
+    "Ppid": 2104,
+    "Name": "powershell.exe",
+    "Exe": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "CommandLine": "powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+    "Username": "LAB\\jdoe",
+    "CreateTime": "2026-08-12T14:11:58Z"
   },
   {
     "Pid": 6120,

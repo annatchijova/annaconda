@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from agent.purple_team_agent import model_id
 from agent.tools import PurpleTeamSession
 from core.verdict_stream import GENESIS_HASH, verify_stream
+from ml.nominator import SurprisalNominator, events_from_artifacts
 from service.case_store import build_case_store
 from tools.velociraptor.adapter import MockTransport
 from tools.velociraptor.vql_templates import TEMPLATES
@@ -214,6 +215,11 @@ async def investigate(req: InvestigateRequest) -> dict:
 
     chain = session.verify_chain()
     entries = list(session._entries)  # sealed stream for this investigation
+    # ML triage: nominate the events most worth attention. Advisory only — it
+    # never touched the sealed verdict above; the core already decided.
+    all_artifacts = [a for w in session._windows.values() for a in w["artifacts"]]
+    nominations = SurprisalNominator().nominate(
+        events_from_artifacts(all_artifacts), window_id=req.case_id)
     inv_id = uuid.uuid4().hex[:12]
     record = {
         "investigation_id": inv_id,
@@ -225,6 +231,7 @@ async def investigate(req: InvestigateRequest) -> dict:
         "chain": chain,
         "stream": entries,
         "audit_trail": session.audit_trail,
+        "nominations": nominations,
     }
     _STORE[inv_id] = record
     return record

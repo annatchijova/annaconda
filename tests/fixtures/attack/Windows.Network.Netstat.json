@@ -10,6 +10,36 @@
     "Timestamp": "2026-08-12T14:11:00Z"
   },
   {
+    "Pid": 3320,
+    "Name": "chrome.exe",
+    "Status": "ESTABLISHED",
+    "Laddr.IP": "10.0.10.21",
+    "Laddr.Port": 51012,
+    "Raddr.IP": "142.250.80.14",
+    "Raddr.Port": 443,
+    "Timestamp": "2026-08-12T14:11:10Z"
+  },
+  {
+    "Pid": 3320,
+    "Name": "chrome.exe",
+    "Status": "ESTABLISHED",
+    "Laddr.IP": "10.0.10.21",
+    "Laddr.Port": 51013,
+    "Raddr.IP": "142.250.80.14",
+    "Raddr.Port": 443,
+    "Timestamp": "2026-08-12T14:11:12Z"
+  },
+  {
+    "Pid": 3612,
+    "Name": "MsMpEng.exe",
+    "Status": "ESTABLISHED",
+    "Laddr.IP": "10.0.10.21",
+    "Laddr.Port": 51020,
+    "Raddr.IP": "142.250.80.14",
+    "Raddr.Port": 443,
+    "Timestamp": "2026-08-12T14:11:20Z"
+  },
+  {
     "Pid": 6120,
     "Name": "updater.exe",
     "Status": "ESTABLISHED",

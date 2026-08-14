@@ -17,7 +17,7 @@ dependencies = []
 dev = ["pytest>=8"]
 
 [tool.setuptools]
-packages = ["core", "sift", "tools", "pipeline", "inference", "security", "verdict", "scripts_lib"]
+packages = ["core", "sift", "ml", "tools", "pipeline", "inference", "security", "verdict", "scripts_lib"]
 py-modules = ["vigia_agent", "vigia_scorer", "sift_orchestrator_shim"]
 
 [tool.pytest.ini_options]
