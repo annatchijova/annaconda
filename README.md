@@ -86,6 +86,10 @@ so the whole case verifies as one unbroken record. Cases persist in Firestore
 (with honest degradation to in-memory when Firestore is unreachable — `/health`
 reports which backend is active).
 
+**It runs without you.** Cloud Scheduler → Pub/Sub → a push to `/tasks/sweep`
+continues hunts on open cases on a cron, appending sealed windows with no human
+in the loop. `/health` shows `autonomous_sweeps`. (See DEPLOY.md.)
+
 ## How it meets the hackathon requirements
 
 | Requirement | How |

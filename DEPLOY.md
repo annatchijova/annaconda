@@ -75,6 +75,25 @@ curl -s -X POST "$URL/investigate" -H 'Content-Type: application/json' \
        "prompt":"Run a baseline sweep, adjudicate it, give the sealed verdict."}'
 ```
 
+## Autonomous operation (runs without a human)
+
+Cloud Scheduler publishes to a Pub/Sub topic on a cron; a push subscription
+delivers to `/tasks/sweep`, which continues hunts on open cases — appending a
+sealed window to each case's chain with nobody pressing a button. `/health`
+reports `autonomous_sweeps` and `last_sweep_utc`.
+
+```bash
+gcloud pubsub topics create annaconda-sweeps --project <project>
+gcloud pubsub subscriptions create annaconda-sweep-push \
+  --topic annaconda-sweeps --push-endpoint "$URL/tasks/sweep" \
+  --ack-deadline 120 --project <project>
+gcloud scheduler jobs create pubsub annaconda-sweeper --location us-central1 \
+  --schedule "*/15 * * * *" --topic annaconda-sweeps --message-body "sweep" \
+  --project <project>
+# trigger on demand for a demo (Pub/Sub push has a few seconds of latency):
+gcloud scheduler jobs run annaconda-sweeper --location us-central1 --project <project>
+```
+
 ## Known considerations
 
 - The service is deployed `--allow-unauthenticated` for the demo. Agent-mode
