@@ -1,97 +1,98 @@
 # Demo video script — annaconda (≤ 4 minutes)
 
-Target: All Things Agentic Hackathon. The rules require the video to show the
-backend running on Google Cloud. Record against the live service:
+All Things Agentic Hackathon. The rules require the video to show the backend
+running on Google Cloud. Record against the live service:
 **https://vigia-live-1028999311218.us-central1.run.app**
 
-Tone: calm, confident, forensic. Let the sealed hashes and the agent's visible
-reasoning do the work. Times are cumulative.
+**Before recording:** open `/console` and click **Reset demo**. This seeds three
+stable showcase cases (benign, malice, and one stuck in ABSTAIN) that the
+autonomous sweep will not touch — so the state is exactly what you expect.
+
+Tone: calm, forensic. Let the hashes and the two narrators do the work. Times
+are cumulative.
 
 ---
 
-### 0:00–0:20 · The thesis (open on `/`)
+### 0:00–0:35 · The document that lies (open `/exhibit`)
 
-> "This is annaconda. It analyzes an endpoint as an attack unfolds and seals a
-> court-defensible verdict. The twist: the AI agent runs the investigation, but
-> it never decides the verdict. The deterministic engine seals the result before
-> any model describes it — so the answer is reproducible, not persuadable."
+No explanation yet. Click **Prompt-injection attack**. Let the panel land in
+silence.
 
-Show the landing hero and the one-invariant callout.
+> "The attacker wrote this line into the endpoint's own telemetry. A model read
+> it and told the analyst: this host is **benign**. And here is annaconda's
+> verdict on the same host: **MALICE**, sealed."
 
-### 0:20–1:15 · The agent investigates (go to `/exhibit`)
+Point at the planted EDR annotation, the naive narrator saying *benign*, and the
+red sealed MALICE_HIGH beside it. Let the judge feel the contradiction before you
+resolve it.
 
-1. Click **Run attack scenario** → the seal turns red, **MALICE_HIGH**.
-2. Click **Ask the agent**. As it runs, narrate:
+### 0:35–1:10 · The thesis (same panel)
 
-> "The agent is autonomous. Watch its decision log."
+> "In forensics the adversary writes the evidence. Put a language model in the
+> loop and it can be addressed directly. So annaconda keeps the model out of the
+> decision entirely: the deterministic engine produces and seals the verdict
+> **before any model runs**, and the model has no tool that can change it. It
+> narrates; it never decides."
 
-Point at the **Agent investigation log** appearing step by step:
+Point at the trust-boundary line (or open `/architecture` briefly).
 
-> "It collected processes and network together, adjudicated a sealed MALICE
-> verdict — Timestomp and Process Hollowing — then, on its own, pivoted to check
-> for persistence. Every step is a tool call; none of them can change the
-> verdict."
+### 1:10–2:00 · Two narrators, one hash (same panel)
 
-Highlight the MITRE techniques (T1070.006, T1055.012) and the sealed entry hash.
+> "Here is the proof, not the claim. The same sealed verdict, narrated by two
+> different Google models. **Gemma** — the naive one — swallowed the bait and
+> said benign. **Gemini**, told the verdict is final, reported MALICE. Different
+> models, different words — **the same hash underneath.**"
 
-### 1:15–1:45 · The differentiator: reproducible (still `/exhibit`)
+Then point at the guard line:
 
-Click **Replay & re-verify seals**.
+> "And a guard catches the baited narration — not a model judging a model, a
+> mechanical comparison of the narrator's claims against the sealed fields. It
+> flagged the false 'benign' automatically."
 
-> "Here's what nothing with an LLM in the decision path can show. We re-derive
-> every seal from the recorded evidence — and the hashes match, bit for bit.
-> Swap Gemini for any other model and the wording changes; the verdict, the
-> score, the hash never do."
+### 2:00–3:00 · Memory, and running without you (go to `/console`)
 
-Let the "HASHES MATCH ✓" land on screen.
+Open **DEMO-ABSTAIN**.
 
-### 1:45–2:35 · The analyst's real workflow (go to `/console`)
+> "A real examiner's cases live here — one host, one tamper-evident record. This
+> one couldn't conclude: the collection was partial, so annaconda returned an
+> honest ABSTAIN instead of a false clean bill of health. And it remembers why,
+> and what evidence would resolve it."
 
-> "This is how an examiner actually uses it. One case per host. Verdicts
-> accumulate into a single tamper-evident record that reopens and defends later."
+Read the open question. Then click **Investigate (benign)** (a complete
+re-collection) — or mention the cron:
 
-- Point at the queue: worst-verdict-first (what needs attention on top).
-- Open a case: show its sealed verdicts, MITRE, and **chain of custody intact**.
-- Click **Investigate (attack)** to append a run; show the chain still verifies.
-- Note the `storage: firestore` badge:
+> "annaconda reopens ABSTAIN cases on its own — Cloud Scheduler to Pub/Sub to
+> Cloud Run, no human in the loop. When the evidence arrives, the case resolves
+> and the chain grows."
 
-> "Persisted in Firestore. And if storage ever degrades, it says so — it never
-> pretends a record is durable when it isn't."
+Show the open question flip to **resolved**, and the chain still verifies.
 
-### 2:35–3:05 · The second agent: the mentor (go to `/consult`)
+### 3:00–3:40 · Architecture & determinism (open `/architecture`, then `/health`)
 
-Ask: *"VIGIA gave me ABSTAIN_INSUFFICIENT and I'm worried I did something wrong."*
-
-> "A second ADK agent mentors junior examiners. Notice it teaches that an honest
-> ABSTAIN is scientific integrity, not a failure — grounded in the engine's real
-> definitions, and it never decides the case for them."
-
-### 3:05–3:35 · Running on Google Cloud (open `/architecture`, then `/health`)
-
-Show the architecture walkthrough (the trust boundary), then hit `/health`:
-
-> "The whole thing runs on Google Cloud: the backend on Cloud Run, Gemini 3.5
-> through Vertex AI, two agents on Google's Agent Development Kit, cases in
-> Firestore."
+> "Two ADK agents on Gemini via Vertex AI, cases in Firestore, all on Cloud Run.
+> And the load-bearing claim is a test: the same case scored in two fresh
+> processes produces byte-identical seals — with the ML triage layer running in
+> the same pipeline. Reproducible in CI, not just in a slide."
 
 `/health` shows `vertex_ai: true`, `case_store: firestore`,
-`llm_in_decision_path: false`.
+`llm_in_decision_path: false`, `autonomous_sweeps`.
 
-### 3:35–4:00 · Close
+### 3:40–4:00 · Honest limitations (say these yourself)
 
-> "annaconda: a live purple-team agent that hunts, maps to MITRE, and seals a
-> reproducible verdict a court could trust — with the language model kept out of
-> the decision entirely. Open source, Apache-2.0, because forensic tooling that
-> decides on people's lives should be inspectable by anyone."
+> "What this is not, yet: the deployed demo runs on bundled telemetry — the live
+> Velociraptor transport is real and tested, but pointing it at Windows
+> endpoints needs a lab and network reach. It's a single Cloud Run instance. And
+> ABSTAIN is a first-class outcome here, not a failure — a defensible 'I cannot
+> conclude' beats a confident wrong answer. That last part is the whole point."
 
-End on the red seal and "reproducible" tagline.
+End on the red seal and "reproducible".
 
 ---
 
-## Shot checklist (for the required "backend on Google Cloud" proof)
+## Shot checklist (the required "backend on Google Cloud" proof)
 
-- [ ] The live `*.run.app` URL visible in the address bar throughout.
-- [ ] `/health` showing `vertex_ai: true` and `case_store: firestore`.
-- [ ] Optional: a glimpse of the Cloud Run service in the GCP console.
-- [ ] The replay "HASHES MATCH" moment.
-- [ ] The agent investigation log with its step-by-step reasons.
+- [ ] `Reset demo` clicked before recording.
+- [ ] The live `*.run.app` URL visible throughout.
+- [ ] `/health`: `vertex_ai: true`, `case_store: firestore`, `autonomous_sweeps`.
+- [ ] The two-narrator panel: Gemma benign vs Gemini malice, one hash.
+- [ ] The ABSTAIN open question resolving.
