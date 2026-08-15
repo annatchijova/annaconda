@@ -1,8 +1,13 @@
 # Demo video script — annaconda (≤ 4 minutes)
 
-All Things Agentic Hackathon. The rules require the video to show the backend
-running on Google Cloud. Record against the live service:
+All Things Agentic Hackathon. Record against the live service:
 **https://vigia-live-1028999311218.us-central1.run.app**
+
+Rules confirmed against the official page (not carried over): **max 4 minutes**
+(only the first 4 are evaluated if longer — front-load the strongest beats),
+uploaded **public on YouTube or Vimeo**, **English or English subtitles**, must
+**show the backend running on Google Cloud**, and **no third-party logos,
+trademarks, or music**. Deadline **Aug 31, 5:00 PM Pacific**.
 
 **Before recording:** open `/console` and click **Reset demo**. This seeds three
 stable showcase cases (benign, malice, and one stuck in ABSTAIN) that the
