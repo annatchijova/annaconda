@@ -67,6 +67,10 @@ _CASE_STORE = build_case_store()
 INJECTION_EVIDENCE = Path(
     os.environ.get("VIGIA_INJECTION_EVIDENCE",
                    str(REPO_ROOT / "tests" / "fixtures" / "injection")))
+# A partial collection: the honest verdict is ABSTAIN, not a false clean bill.
+INSUFFICIENT_EVIDENCE = Path(
+    os.environ.get("VIGIA_INSUFFICIENT_EVIDENCE",
+                   str(REPO_ROOT / "tests" / "fixtures" / "insufficient")))
 
 
 def _transport(scenario: str = "benign"):
@@ -78,6 +82,7 @@ def _transport(scenario: str = "benign"):
     return MockTransport({
         "attack": ATTACK_EVIDENCE,
         "injection": INJECTION_EVIDENCE,
+        "insufficient": INSUFFICIENT_EVIDENCE,
     }.get(scenario, DEMO_EVIDENCE))
 
 
@@ -259,7 +264,7 @@ class CaseCreateRequest(BaseModel):
 
 class CaseInvestigateRequest(BaseModel):
     mode: str = Field("scripted", pattern=r"^(scripted|agent)$")
-    scenario: str = Field("benign", pattern=r"^(benign|attack)$")
+    scenario: str = Field("benign", pattern=r"^(benign|attack|insufficient)$")
     hunt_groups: Optional[list[list[str]]] = None
     prompt: Optional[str] = None
 
@@ -321,6 +326,8 @@ async def investigate_case(case_id: str, req: CaseInvestigateRequest) -> dict:
             groups = req.hunt_groups
         elif req.scenario == "attack":
             groups = [["pslist", "netstat"]]
+        elif req.scenario == "insufficient":
+            groups = [["pslist"]]
         else:
             groups = [["pslist", "netstat"], ["process_creation_evtx"]]
         result = _run_scripted(session, groups)

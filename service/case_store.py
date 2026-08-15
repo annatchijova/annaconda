@@ -54,6 +54,52 @@ def _summarize(case: dict) -> dict:
     }
 
 
+# What an ABSTAIN remembers: why it could not conclude, and what would resolve
+# it. This is the case's working memory — not a chat log, but discarded ground
+# and the missing evidence — so an autonomous re-hunt knows what to look for.
+_ABSTAIN_MEMORY = {
+    "ABSTAIN_INSUFFICIENT": (
+        "The collection was incomplete — evidence was acquired but not fully "
+        "extracted, so certifying the host clean would be a false bill of health.",
+        "Re-collect once artifact extraction completes, and correlate processes "
+        "with their network activity in one window.",
+    ),
+    "ABSTAIN_CONTRADICTION": (
+        "The evidence contradicts itself; the abductive cycle could not settle.",
+        "Gather independent corroborating evidence to break the contradiction.",
+    ),
+    "ABSTAIN_DEGRADED": (
+        "Critical analyzers were disabled during analysis; the result is unreliable.",
+        "Re-run the investigation with full analyzer integrity.",
+    ),
+}
+
+
+def _update_open_question(case: dict, verdicts: list) -> None:
+    """Turn ABSTAIN into memory and reentry. Opens a question when a run cannot
+    conclude; resolves it when a later run reaches a definitive verdict."""
+    states = [v.get("verdict_state", "") for v in verdicts]
+    abstained = next((s for s in states if s.startswith("ABSTAIN")), None)
+    concluded = next((s for s in states
+                      if s.startswith("MALICE") or s.startswith("BENIGN")), None)
+    q = case.get("open_question")
+
+    if abstained and (q is None or q.get("resolved")):
+        why, resolves = _ABSTAIN_MEMORY.get(
+            abstained, ("Could not conclude.", "Collect more evidence."))
+        case["open_question"] = {
+            "state": abstained, "why": why, "what_would_resolve": resolves,
+            "opened_at_run": case.get("runs", 0), "resolved": False,
+            "resolved_at_run": None, "resolved_verdict": None,
+        }
+    elif concluded and q is not None and not q.get("resolved"):
+        q["resolved"] = True
+        q["resolved_at_run"] = case.get("runs", 0)
+        q["resolved_verdict"] = concluded
+        # No longer stuck — reflect the conclusion the reentry reached.
+        case["status"] = "malice" if concluded.startswith("MALICE") else "benign"
+
+
 def _apply_run(case: dict, entries: list, verdicts: list, audit: list) -> dict:
     """Append one investigation run's sealed output to the case, recompute the
     worst verdict and status. Pure dict update — the sealing already happened
@@ -81,6 +127,8 @@ def _apply_run(case: dict, entries: list, verdicts: list, audit: list) -> dict:
         case["status"] = "benign"
     else:
         case["status"] = "open"
+
+    _update_open_question(case, verdicts)
     return case
 
 
@@ -96,6 +144,7 @@ class MemoryCaseStore:
             "created_utc": _now(), "updated_utc": _now(),
             "status": "open", "worst_verdict": None,
             "entries": [], "verdicts": [], "audit_trail": [], "runs": 0,
+            "open_question": None,
         }
         self._cases[case_id] = case
         return case
@@ -132,6 +181,7 @@ class FirestoreCaseStore:
             "created_utc": _now(), "updated_utc": _now(),
             "status": "open", "worst_verdict": None,
             "entries": [], "verdicts": [], "audit_trail": [], "runs": 0,
+            "open_question": None,
         }
         self._col.document(case_id).set(case)
         return case

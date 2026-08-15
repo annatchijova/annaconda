@@ -86,6 +86,26 @@ def test_case_chain_continues_and_verifies_across_runs(tmp_path):
     assert report["chain_ok"], report["errors"]
 
 
+def test_abstain_opens_a_question_and_reentry_resolves_it():
+    """ABSTAIN becomes memory + a reentry point: the case records why it could
+    not conclude and what would resolve it, and a later definitive run closes
+    the question."""
+    store = MemoryCaseStore()
+    store.create_case("A", {"hostname": "H"}, "op")
+    store.apply_run("A", [], [{"verdict_state": "ABSTAIN_INSUFFICIENT"}], [])
+    q = store.get_case("A")["open_question"]
+    assert q is not None and q["resolved"] is False
+    assert q["why"] and q["what_would_resolve"]  # memory, not a chat log
+    assert store.get_case("A")["status"] == "abstain"
+
+    # An autonomous re-hunt reaches a definitive verdict -> the question resolves.
+    store.apply_run("A", [], [{"verdict_state": "BENIGN_HIGH"}], [])
+    q = store.get_case("A")["open_question"]
+    assert q["resolved"] is True
+    assert q["resolved_verdict"] == "BENIGN_HIGH"
+    assert store.get_case("A")["status"] == "benign"
+
+
 def test_verdict_rank_orders_severity():
     assert verdict_rank("MALICE_HIGH") > verdict_rank("ABSTAIN_INSUFFICIENT")
     assert verdict_rank("ABSTAIN_INSUFFICIENT") > verdict_rank("BENIGN_HIGH")

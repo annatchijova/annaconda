@@ -50,6 +50,8 @@ _ENGINE_METADATA_FIELDS = (
     "pid_hidden",             # PROCESS_INJECTION_ANTIFORENSIC
     "pid",                    # cross-artifact process correlation
     "dst_ip",                 # network destination
+    "status",                 # collection/analysis state (intake-abstain gate)
+    "analysis_status",        # PENDING -> the honest verdict is ABSTAIN
 )
 
 

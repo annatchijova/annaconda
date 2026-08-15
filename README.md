@@ -90,6 +90,13 @@ reports which backend is active).
 continues hunts on open cases on a cron, appending sealed windows with no human
 in the loop. `/health` shows `autonomous_sweeps`. (See DEPLOY.md.)
 
+**ABSTAIN is memory, not a dead end.** When the engine cannot conclude (e.g. a
+partial collection), the case records *why* it abstained and *what evidence
+would resolve it* — real working memory, not a chat log. The autonomous sweep
+reopens the case, and when a later run reaches a definitive verdict the open
+question is resolved and recorded. An investigation that survives across weeks,
+not one that forgets.
+
 ## How it meets the hackathon requirements
 
 | Requirement | How |

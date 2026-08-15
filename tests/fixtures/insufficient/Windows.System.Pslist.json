@@ -1,0 +1,10 @@
+[
+  {
+    "Pid": 4400,
+    "Name": "MpCmdRun.exe",
+    "Exe": "C:\\Program Files\\Windows Defender\\MpCmdRun.exe",
+    "CommandLine": "MpCmdRun.exe -Scan -ScanType 1",
+    "CreateTime": "2026-08-12T14:12:00Z",
+    "analysis_status": "PENDING: collection interrupted, artifact extraction incomplete"
+  }
+]

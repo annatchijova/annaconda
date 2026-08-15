@@ -75,6 +75,12 @@
   .dmeta b{color:var(--ink);}
   .chainok{font-family:var(--sans);font-size:.72rem;margin-top:.6rem;}
   .chainok.ok{color:var(--sealed);} .chainok.bad{color:var(--seal);}
+  .oq{padding:.9rem 1.2rem;background:#f7f2e8;border-bottom:1px solid var(--hairline);border-left:4px solid var(--amber);font-size:.9rem;line-height:1.5;color:var(--ink);}
+  .oq b{color:var(--amber);}
+  .oq .oqres{margin-top:.5rem;}
+  .oq .oqmem{margin-top:.4rem;font-size:.8rem;color:var(--ink-soft);font-style:italic;}
+  .oq.resolved{background:#eef4f0;border-left-color:var(--sealed);}
+  .oq.resolved b{color:var(--sealed);}
   .actions{padding:.9rem 1.2rem;border-bottom:1px solid var(--hairline);display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;background:#fbfcfc;}
   .actions .spin{font-family:var(--mono);font-size:.72rem;color:var(--amber);margin-left:auto;}
   .verdicts{padding:.6rem 0;}
@@ -160,6 +166,20 @@ async function openCase(id){
   loadQueue();
 }
 
+function openQuestionHTML(q){
+  if(!q) return "";
+  if(q.resolved){
+    return '<div class="oq resolved"><b>Open question — resolved.</b> '
+      +'The case could not conclude on run '+q.opened_at_run+' ('+q.state.replace("_"," ")
+      +'); an autonomous re-hunt resolved it on run '+q.resolved_at_run+' &rarr; <b>'
+      +(q.resolved_verdict||"").replace("_"," ")+'</b>.</div>';
+  }
+  return '<div class="oq"><b>Open question — '+q.state.replace("_"," ")+'.</b> '
+    +'<span class="oqwhy">'+q.why+'</span>'
+    +'<div class="oqres"><b>What would resolve it:</b> '+q.what_would_resolve+'</div>'
+    +'<div class="oqmem">The case remembers this. The autonomous sweep will reopen it when the evidence appears.</div></div>';
+}
+
 function renderDetail(r){
   const c=r.case, d=$("detail");
   const verds=(c.verdicts||[]).map((v,i)=>{
@@ -177,12 +197,15 @@ function renderDetail(r){
     +'<span>RUNS <b>'+(c.runs||0)+'</b></span>'
     +'<span>SEALED <b>'+((c.entries||[]).length)+'</b></span></div>'
     +'<div class="chainok '+(r.chain_ok?"ok":"bad")+'">'+(r.chain_ok?"✓ chain of custody intact":"✗ CHAIN BROKEN")+'</div></div>'
+    +openQuestionHTML(c.open_question)
     +'<div class="actions">'
     +'<button class="ghost" id="invBenign">Investigate (benign)</button>'
     +'<button class="danger" id="invAttack">Investigate (attack)</button>'
+    +'<button class="ghost" id="invInsuff">Partial collection</button>'
     +'<button class="ghost" id="invAgent">Ask the agent</button>'
     +'<span class="spin" id="dspin"></span></div>'
     +'<div class="verdicts">'+verds+'</div>';
+  $("invInsuff").onclick=()=>investigate(c.case_id,"scripted","insufficient");
   $("invBenign").onclick=()=>investigate(c.case_id,"scripted","benign");
   $("invAttack").onclick=()=>investigate(c.case_id,"scripted","attack");
   $("invAgent").onclick=()=>investigate(c.case_id,"agent",SELECTED_SCENARIO);
