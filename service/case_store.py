@@ -96,8 +96,13 @@ def _update_open_question(case: dict, verdicts: list) -> None:
         q["resolved"] = True
         q["resolved_at_run"] = case.get("runs", 0)
         q["resolved_verdict"] = concluded
-        # No longer stuck — reflect the conclusion the reentry reached.
-        case["status"] = "malice" if concluded.startswith("MALICE") else "benign"
+        # Reflect the conclusion the reentry reached — but NEVER downgrade a case
+        # that already has a worse verdict in its history. A case whose worst is
+        # MALICE must never display "benign" just because a later partial
+        # collection resolved cleanly (red-team finding, self-corrected).
+        worst = case.get("worst_verdict") or ""
+        if not (worst.startswith("MALICE") or worst == "ESCALATE"):
+            case["status"] = "malice" if concluded.startswith("MALICE") else "benign"
 
 
 def _apply_run(case: dict, entries: list, verdicts: list, audit: list) -> dict:

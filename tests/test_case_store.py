@@ -106,6 +106,25 @@ def test_abstain_opens_a_question_and_reentry_resolves_it():
     assert store.get_case("A")["status"] == "benign"
 
 
+def test_a_malice_case_never_displays_benign_after_an_abstain_resolves():
+    """Red-team regression: a case whose worst verdict is MALICE must never show
+    status 'benign' just because a later partial collection abstained and then
+    resolved cleanly — that would hide a real detection in the queue."""
+    store = MemoryCaseStore()
+    store.create_case("M", {"hostname": "H"}, "op")
+    store.apply_run("M", [], [{"verdict_state": "MALICE_HIGH"}], [])
+    store.apply_run("M", [], [{"verdict_state": "ABSTAIN_INSUFFICIENT"}], [])
+    store.apply_run("M", [], [{"verdict_state": "BENIGN_HIGH"}], [])
+    c = store.get_case("M")
+    assert c["worst_verdict"] == "MALICE_HIGH"
+    assert c["status"] == "malice"  # never benign
+    # a clean case that only ever abstained CAN resolve to benign
+    store.create_case("A", {"hostname": "H"}, "op")
+    store.apply_run("A", [], [{"verdict_state": "ABSTAIN_INSUFFICIENT"}], [])
+    store.apply_run("A", [], [{"verdict_state": "BENIGN_HIGH"}], [])
+    assert store.get_case("A")["status"] == "benign"
+
+
 def test_verdict_rank_orders_severity():
     assert verdict_rank("MALICE_HIGH") > verdict_rank("ABSTAIN_INSUFFICIENT")
     assert verdict_rank("ABSTAIN_INSUFFICIENT") > verdict_rank("BENIGN_HIGH")

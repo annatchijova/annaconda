@@ -172,6 +172,13 @@ floats, no black-box dependencies in any sealed value.
   the demo. Multi-instance sharing works through Firestore.
 - An `ABSTAIN` verdict is a first-class, honest outcome, not a failure — a
   defensible "I cannot conclude" beats a confident wrong answer.
+- A sealed verdict certifies *reproducible adjudication of the collected
+  evidence*, not the truth of that evidence. annaconda inherits the collector's
+  trust boundary: an attacker who controls the endpoint's reported telemetry can,
+  with a corroborated picture, induce a wrong verdict, and a rootkit that hides
+  from the collector hides from annaconda. This is examined in
+  [docs/RED_TEAM_AUDIT.md](docs/RED_TEAM_AUDIT.md), which also records the attacks
+  the sealing and reproducibility withstood.
 
 ## Roadmap
 
