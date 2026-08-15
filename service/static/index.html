@@ -56,6 +56,24 @@
   button.danger:hover{background:var(--seal-deep);}
   button.inject{color:#fff;background:#6d3a86;}
   button.inject:hover{background:#582d6c;}
+  button.fleet{color:#fff;background:#1f6b6b;}
+  button.fleet:hover{background:#175252;}
+  .fleetdemo{padding:1.3rem clamp(1.5rem,4vw,3rem) 1.6rem;border-top:2px solid var(--ink);background:linear-gradient(#e7f0f0,var(--card));}
+  .fleetdemo .fl{margin-bottom:1rem;color:#1f6b6b;}
+  .roles{display:grid;grid-template-columns:repeat(2,1fr);gap:.8rem;margin-bottom:1.3rem;}
+  @media(max-width:640px){.roles{grid-template-columns:1fr;}}
+  .role{background:#fff;border:1px solid var(--hairline);border-radius:5px;padding:.8rem 1rem;}
+  .role .rn{font-family:var(--sans);font-size:.78rem;font-weight:700;color:#1f6b6b;text-transform:uppercase;letter-spacing:.04em;}
+  .role .rd{font-size:.86rem;color:var(--ink-soft);margin:.2rem 0 .5rem;}
+  .role .rt{font-family:var(--mono);font-size:.74rem;color:var(--legal);}
+  .flog{list-style:none;margin:0;padding:0;}
+  .flog li{display:grid;grid-template-columns:11rem auto 1fr;gap:.6rem;align-items:baseline;padding:.4rem 0;border-bottom:1px solid var(--hairline-2);font-size:.88rem;}
+  @media(max-width:600px){.flog li{grid-template-columns:1fr;gap:.1rem;}}
+  .flog li:last-child{border-bottom:0;}
+  .flog .who{font-family:var(--mono);font-size:.76rem;color:#1f6b6b;font-weight:600;}
+  .flog .act{font-family:var(--mono);font-size:.76rem;color:var(--ink-faint);}
+  .flog .res{color:var(--ink);}
+  .flog .res.malice{color:var(--seal);font-weight:700;} .flog .res.benign{color:var(--sealed);}
   .injectdemo{padding:1.3rem clamp(1.5rem,4vw,3rem) 1.6rem;border-top:2px solid var(--ink);background:linear-gradient(#efeaf3,var(--card));}
   .injectdemo .fl{margin-bottom:1.1rem;color:#6d3a86;}
   .inj-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
@@ -168,6 +186,7 @@
     <button class="primary" id="runBtn">Run sealed investigation</button>
     <button class="danger" id="attackBtn">Run attack scenario</button>
     <button class="inject" id="injectBtn">Prompt-injection attack</button>
+    <button class="fleet" id="fleetBtn">Run the fleet</button>
     <button class="ghost" id="agentBtn">Ask the agent</button>
     <a class="ghost" href="/console" style="text-decoration:none;display:inline-block;line-height:1;padding:.62rem 1.2rem;">Case queue &rarr;</a>
     <a class="ghost" href="/consult" style="text-decoration:none;display:inline-block;line-height:1;padding:.62rem 1.2rem;">Mentor &rarr;</a>
@@ -215,6 +234,12 @@
     <p class="inj-inv" id="injInv"></p>
   </section>
 
+  <section class="fleetdemo" id="fleetDemo" hidden>
+    <p class="fl">Specialized fleet &middot; strictly disjoint tool contracts, one sealed chain</p>
+    <div class="roles" id="fleetRoles"></div>
+    <ol class="flog" id="fleetLog"></ol>
+  </section>
+
   <div class="empty-note" id="emptyNote">Run an investigation to freeze evidence windows and seal their verdicts.</div>
 
   <footer class="replay">
@@ -257,7 +282,7 @@ async function investigate(mode, scenario){
   }finally{ setBusy(false,""); }
 }
 
-function setBusy(b,msg){ $("spin").textContent=b?msg:""; $("runBtn").disabled=b; $("agentBtn").disabled=b; $("attackBtn").disabled=b; $("injectBtn").disabled=b; }
+function setBusy(b,msg){ $("spin").textContent=b?msg:""; $("runBtn").disabled=b; $("agentBtn").disabled=b; $("attackBtn").disabled=b; $("injectBtn").disabled=b; $("fleetBtn").disabled=b; }
 
 function render(){
   const inv=STATE.inv; if(!inv||!inv.verdicts.length){ return; }
@@ -353,7 +378,31 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 $("runBtn").onclick=()=>investigate("scripted","benign");
 $("attackBtn").onclick=()=>investigate("scripted","attack");
 $("injectBtn").onclick=injectionDemo;
+$("fleetBtn").onclick=fleetDemo;
 $("agentBtn").onclick=()=>investigate("agent");
+
+async function fleetDemo(){
+  setBusy(true,"dispatching the fleet…"); $("fleetBtn").disabled=true;
+  try{
+    const r=await (await fetch("/fleet-investigate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scenario:"attack"})})).json();
+    $("bodyPanel").hidden=true; $("agentLog").hidden=true; $("mlTriage").hidden=true; $("injectDemo").hidden=true;
+    $("timeline").innerHTML=""; $("emptyNote").hidden=true;
+    $("fleetRoles").innerHTML=Object.keys(r.roles).map(name=>
+      '<div class="role"><div class="rn">'+name+'</div><div class="rd">'+r.roles[name]+'</div>'
+      +'<div class="rt">'+(r.contracts[name]||[]).join(", ")+'</div></div>').join("");
+    $("fleetLog").innerHTML=r.fleet_log.map(e=>{
+      const res=e.verdict_state||e.window_id||e.detail||(e.chain_ok!==undefined?('custody '+(e.chain_ok?'intact ✓':'broken ✗')):'')||e.error||'';
+      const cls=(e.verdict_state||'').startsWith('MALICE')?'malice':(e.verdict_state||'').startsWith('BENIGN')?'benign':'';
+      const tt=(e.mitre_techniques||[]).join(' ');
+      return '<li><span class="who">'+e.role+'</span><span class="act">'+e.action+'</span>'
+        +'<span class="res '+cls+'">'+res+(tt?' &middot; '+tt:'')+'</span></li>';
+    }).join("");
+    $("fleetDemo").hidden=false;
+    $("replayStatus").innerHTML='Fleet sealed &middot; <span class="'+((r.worst_verdict||'').startsWith('MALICE')?'bad':'ok')+'">worst verdict '+(r.worst_verdict||'—').replace("_"," ")+'</span> &middot; chain '+(r.chain.chain_ok?'verified ✓':'BROKEN')+'';
+    $("replayBtn").disabled=true;
+  }catch(e){ $("replayStatus").innerHTML='<span class="bad">Fleet run failed: '+e.message+'</span>'; }
+  finally{ setBusy(false,""); $("fleetBtn").disabled=false; }
+}
 
 async function injectionDemo(){
   setBusy(true,"planting evidence, baiting a naive narrator…");

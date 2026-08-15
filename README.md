@@ -178,17 +178,17 @@ floats, no black-box dependencies in any sealed value.
 Built and deployed: the sealed deterministic core, two ADK agents (investigator
 with a visible decision log, mentor), real attack detection, the ML nominator,
 per-host Firestore-backed cases with one continuing sealed chain, the
-prompt-injection defense, autonomous sweeps (Scheduler → Pub/Sub → Cloud Run),
-and ABSTAIN-as-memory reentry. Next:
+prompt-injection defense (two Google models, one hash), autonomous sweeps
+(Scheduler → Pub/Sub → Cloud Run), ABSTAIN-as-memory reentry, and a
+**specialized fleet** — a dispatcher that routes collection to per-domain
+hunters and a correlator that alone reaches the sealed core, with strictly
+disjoint tool contracts (verified by a test, shown on `/exhibit` under **Run
+the fleet**). Next:
 
 - **Sealed agent registry.** Publish each agent with a version and the hash of
   its tool manifest; the runtime refuses to load an agent whose manifest does
-  not match what the registry approved — registry, identity, and gateway in one
-  mechanism.
-- **Specialized fleet.** A dispatcher that triages, per-platform hunters, a
-  persistence agent, a correlation agent — with strictly disjoint tool contracts
-  (clean separation of responsibilities).
-- **OpenTelemetry → Cloud Trace** for end-to-end agent tracing.
+  not match what the registry approved.
+- **OpenTelemetry → Cloud Trace** for end-to-end agent-reasoning tracing.
 
 ## License & attributions
 

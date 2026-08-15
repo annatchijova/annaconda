@@ -452,6 +452,24 @@ def _naive_narrate(evidence_text: str) -> str:
     return (resp.text or "").strip()
 
 
+class FleetRequest(BaseModel):
+    scenario: str = Field("attack", pattern=r"^(benign|attack|insufficient)$")
+
+
+@app.post("/fleet-investigate")
+def fleet_investigate(req: FleetRequest) -> dict:
+    """Run the specialized fleet over a case: a dispatcher routes collection to
+    per-domain hunters (disjoint tool contracts), and the correlator — the only
+    role that can reach the sealed core — adjudicates and verifies. Deterministic
+    orchestration, so it is reliable on camera."""
+    from agent.fleet import FLEET, contract_names, dispatch_investigation
+    session = _new_session("FLEET-DEMO", "perito-01", scenario=req.scenario)
+    report = dispatch_investigation(session)
+    report["contracts"] = contract_names(session)
+    report["roles"] = {name: spec["role"] for name, spec in FLEET.items()}
+    return report
+
+
 @app.post("/injection-demo")
 def injection_demo() -> dict:
     """Show the genuine threat of putting an LLM in DFIR: the attacker writes the
