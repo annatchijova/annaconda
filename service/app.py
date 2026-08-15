@@ -371,7 +371,9 @@ def _gemma_client():
     the sealed verdict is identical under both — swap-the-narrator demonstrated,
     not merely claimed."""
     from google import genai
-    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    # vertexai=False forces the Gemini Developer API even when the service runs
+    # with GOOGLE_GENAI_USE_VERTEXAI=TRUE (Gemma is not served on Vertex).
+    return genai.Client(vertexai=False, api_key=os.environ["GEMINI_API_KEY"])
 
 
 def _faithful_narrate(sealed: dict) -> str:
