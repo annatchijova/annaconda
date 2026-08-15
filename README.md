@@ -183,11 +183,11 @@ prompt-injection defense (two Google models, one hash), autonomous sweeps
 **specialized fleet** — a dispatcher that routes collection to per-domain
 hunters and a correlator that alone reaches the sealed core, with strictly
 disjoint tool contracts (verified by a test, shown on `/exhibit` under **Run
-the fleet**). Next:
+the fleet**), and a **sealed agent registry** — every agent published with a
+version and the hash of its tool manifest (same encoder that seals verdicts);
+the runtime refuses to load an agent whose manifest is not approved
+(`GET /registry`; `agent/registry.py`). Next:
 
-- **Sealed agent registry.** Publish each agent with a version and the hash of
-  its tool manifest; the runtime refuses to load an agent whose manifest does
-  not match what the registry approved.
 - **OpenTelemetry → Cloud Trace** for end-to-end agent-reasoning tracing.
 
 ## License & attributions

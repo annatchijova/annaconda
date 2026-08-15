@@ -192,6 +192,15 @@ def health() -> dict:
     }
 
 
+@app.get("/registry")
+def registry() -> dict:
+    """The sealed agent registry: every agent published with its version and the
+    hash of its tool manifest. The runtime refuses to load an agent whose
+    manifest is not here."""
+    from agent.registry import REGISTRY_VERSION, approved_registry
+    return {"registry_version": REGISTRY_VERSION, "agents": approved_registry()}
+
+
 @app.get("/hunts")
 def hunts() -> dict:
     return {

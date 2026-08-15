@@ -65,7 +65,17 @@ def build_agent(session: PurpleTeamSession, *, model: str | None = None):
     google.adk present.
     """
     from google.adk.agents import Agent
+    from agent.registry import REGISTRY_VERSION, require_approved
 
+    tools = [
+        session.list_available_hunts,
+        session.run_hunt,
+        session.adjudicate,
+        session.verify_chain,
+    ]
+    # Sealed registry gate: refuse to load if the tool manifest is not approved.
+    require_approved("vigia_purple_team", REGISTRY_VERSION,
+                     [t.__name__ for t in tools])
     return Agent(
         name="vigia_purple_team",
         model=model or model_id(),
@@ -74,10 +84,5 @@ def build_agent(session: PurpleTeamSession, *, model: str | None = None):
             "Velociraptor hunts and explains sealed, deterministic verdicts."
         ),
         instruction=INSTRUCTION,
-        tools=[
-            session.list_available_hunts,
-            session.run_hunt,
-            session.adjudicate,
-            session.verify_chain,
-        ],
+        tools=tools,
     )

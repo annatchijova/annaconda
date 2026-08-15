@@ -91,15 +91,20 @@ def contract_names(session: PurpleTeamSession) -> dict:
 
 
 def build_specialist(name: str, session: PurpleTeamSession, *, model=None):
-    """Build one specialist ADK agent bound to only its disjoint tool contract."""
+    """Build one specialist ADK agent bound to only its disjoint tool contract.
+    The sealed registry gates the load: a specialist whose tools do not match its
+    approved manifest is refused."""
     from google.adk.agents import Agent
+    from agent.registry import REGISTRY_VERSION, require_approved
     spec = FLEET[name]
+    tools = spec["tools"](session)
+    require_approved(name, REGISTRY_VERSION, [t.__name__ for t in tools])
     return Agent(
         name=f"vigia_{name.replace('-', '_')}",
         model=model or model_id(),
         description=f"annaconda fleet · {name}: {spec['role']}",
         instruction=_SPECIALIST_INSTRUCTION.format(name=name, role=spec["role"]),
-        tools=spec["tools"](session),
+        tools=tools,
     )
 
 

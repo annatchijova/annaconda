@@ -53,7 +53,17 @@ def build_consult_agent(tools: ConsultTools, *, model: str | None = None):
     """Build the mentor ADK Agent. Imported lazily so agent/consult_tools.py
     stays importable and testable without google.adk present."""
     from google.adk.agents import Agent
+    from agent.registry import REGISTRY_VERSION, require_approved
 
+    tool_list = [
+        tools.explain_mitre_technique,
+        tools.explain_verdict_state,
+        tools.list_verdict_states,
+        tools.list_available_hunts,
+        tools.explain_investigation,
+    ]
+    require_approved("vigia_mentor", REGISTRY_VERSION,
+                     [t.__name__ for t in tool_list])
     return Agent(
         name="vigia_mentor",
         model=model or model_id(),
@@ -62,11 +72,5 @@ def build_consult_agent(tools: ConsultTools, *, model: str | None = None):
             "MITRE ATT&CK, and annaconda's sealed verdicts. Guides, never decides."
         ),
         instruction=INSTRUCTION,
-        tools=[
-            tools.explain_mitre_technique,
-            tools.explain_verdict_state,
-            tools.list_verdict_states,
-            tools.list_available_hunts,
-            tools.explain_investigation,
-        ],
+        tools=tool_list,
     )
