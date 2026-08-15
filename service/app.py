@@ -82,6 +82,10 @@ def _rate_ok(key: str) -> bool:
 # Durable case store (Firestore when reachable, else memory — see case_store).
 _CASE_STORE = build_case_store()
 
+# Reasoning-chain tracing to Cloud Trace (no-op if unavailable — honest).
+from service.tracing import setup_tracing, tracing_mode  # noqa: E402
+_TRACING = setup_tracing()
+
 
 INJECTION_EVIDENCE = Path(
     os.environ.get("VIGIA_INJECTION_EVIDENCE",
@@ -181,6 +185,7 @@ def health() -> dict:
         "case_store": _CASE_STORE.backend,
         "autonomous_sweeps": _SWEEP_STATE["count"],
         "last_sweep_utc": _SWEEP_STATE["last_utc"],
+        "tracing": tracing_mode(),
         "narrators": {
             "investigator": {
                 "model": model_id(),

@@ -21,8 +21,34 @@ The single-investigator route is untouched; the fleet is additive.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from agent.purple_team_agent import model_id
 from agent.tools import PurpleTeamSession
+
+try:
+    from opentelemetry import trace as _otel
+    _TRACER = _otel.get_tracer("annaconda.fleet")
+except Exception:  # noqa: BLE001 — tracing is optional
+    _TRACER = None
+
+
+@contextmanager
+def _span(name: str, **attrs):
+    """A reasoning-chain span. No-op unless a tracer provider is configured, so
+    it is safe in tests and local runs."""
+    if _TRACER is None:
+        yield None
+        return
+    with _TRACER.start_as_current_span(name) as sp:
+        for k, v in attrs.items():
+            if v is not None:
+                try:
+                    sp.set_attribute(k, v if isinstance(v, (str, int, float, bool))
+                                     else str(v))
+                except Exception:  # noqa: BLE001
+                    pass
+        yield sp
 
 
 # --- disjoint tool contracts -------------------------------------------------
@@ -119,34 +145,44 @@ def dispatch_investigation(session: PurpleTeamSession) -> dict:
     adjudicate, verify = correlator_tools(session)
 
     log = []
-    catalogue = dispatch()
-    log.append({"role": "dispatcher", "action": "triage",
-                "detail": f"{len(catalogue['hunts'])} curated hunts; "
-                          f"assigning collection to the hunters"})
+    with _span("fleet.investigate", **{"case_id": session.case_id}):
+        with _span("dispatcher.triage") as _:
+            catalogue = dispatch()
+        log.append({"role": "dispatcher", "action": "triage",
+                    "detail": f"{len(catalogue['hunts'])} curated hunts; "
+                              f"assigning collection to the hunters"})
 
-    verdicts = []
-    for role, tool, reason in (
-        ("windows-hunter", hunt_windows, "baseline running state"),
-        ("persistence-agent", hunt_persistence, "persistence surface"),
-    ):
-        summary = tool(reason)
-        if "error" in summary:
-            log.append({"role": role, "action": "collect", "error": summary["error"]})
-            continue
-        log.append({"role": role, "action": "collect",
-                    "window_id": summary["window_id"],
-                    "artifacts": summary.get("artifacts")})
-        verdict = adjudicate(summary["window_id"])
-        if "error" not in verdict:
-            verdicts.append(verdict)
-            log.append({"role": "correlator", "action": "adjudicate",
+        verdicts = []
+        for role, tool, reason in (
+            ("windows-hunter", hunt_windows, "baseline running state"),
+            ("persistence-agent", hunt_persistence, "persistence surface"),
+        ):
+            with _span(f"{role}.collect", **{"fleet.role": role}):
+                summary = tool(reason)
+            if "error" in summary:
+                log.append({"role": role, "action": "collect",
+                            "error": summary["error"]})
+                continue
+            log.append({"role": role, "action": "collect",
                         "window_id": summary["window_id"],
-                        "verdict_state": verdict["verdict_state"],
-                        "mitre_techniques": verdict.get("mitre_techniques", [])})
+                        "artifacts": summary.get("artifacts")})
+            with _span("correlator.adjudicate",
+                       **{"fleet.role": "correlator",
+                          "window_id": summary["window_id"]}) as sp:
+                verdict = adjudicate(summary["window_id"])
+                if sp is not None and "error" not in verdict:
+                    sp.set_attribute("verdict.state", verdict["verdict_state"])
+            if "error" not in verdict:
+                verdicts.append(verdict)
+                log.append({"role": "correlator", "action": "adjudicate",
+                            "window_id": summary["window_id"],
+                            "verdict_state": verdict["verdict_state"],
+                            "mitre_techniques": verdict.get("mitre_techniques", [])})
 
-    chain = verify()
-    log.append({"role": "correlator", "action": "verify_custody",
-                "chain_ok": chain.get("chain_ok")})
+        with _span("correlator.verify_custody"):
+            chain = verify()
+        log.append({"role": "correlator", "action": "verify_custody",
+                    "chain_ok": chain.get("chain_ok")})
 
     worst = None
     from service.case_store import verdict_rank
