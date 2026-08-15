@@ -1,0 +1,24 @@
+name: tests
+
+# The load-bearing guarantee runs in CI, not just on a laptop: the cross-process
+# determinism checks (same case, two fresh interpreters, byte-identical seals)
+# and the "nominator floats never reach the seal" check run on every push.
+# Tests that need a live model or the Velociraptor binary are gated and skip.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+      - name: Run the test suite
+        run: python -m pytest -q
