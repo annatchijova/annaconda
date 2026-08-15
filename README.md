@@ -173,6 +173,23 @@ floats, no black-box dependencies in any sealed value.
 - An `ABSTAIN` verdict is a first-class, honest outcome, not a failure — a
   defensible "I cannot conclude" beats a confident wrong answer.
 
+## Roadmap
+
+Built and deployed: the sealed deterministic core, two ADK agents (investigator
+with a visible decision log, mentor), real attack detection, the ML nominator,
+per-host Firestore-backed cases with one continuing sealed chain, the
+prompt-injection defense, autonomous sweeps (Scheduler → Pub/Sub → Cloud Run),
+and ABSTAIN-as-memory reentry. Next:
+
+- **Sealed agent registry.** Publish each agent with a version and the hash of
+  its tool manifest; the runtime refuses to load an agent whose manifest does
+  not match what the registry approved — registry, identity, and gateway in one
+  mechanism.
+- **Specialized fleet.** A dispatcher that triages, per-platform hunters, a
+  persistence agent, a correlation agent — with strictly disjoint tool contracts
+  (clean separation of responsibilities).
+- **OpenTelemetry → Cloud Trace** for end-to-end agent tracing.
+
 ## License & attributions
 
 Apache-2.0 — open source not because the hackathon requires it (it doesn't), but
