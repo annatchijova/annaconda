@@ -83,7 +83,7 @@ def _rate_ok(key: str) -> bool:
 _CASE_STORE = build_case_store()
 
 # Reasoning-chain tracing to Cloud Trace (no-op if unavailable — honest).
-from service.tracing import setup_tracing, tracing_mode  # noqa: E402
+from service.tracing import flush_tracing, setup_tracing, tracing_mode  # noqa: E402
 _TRACING = setup_tracing()
 
 
@@ -481,6 +481,7 @@ def fleet_investigate(req: FleetRequest) -> dict:
     report = dispatch_investigation(session)
     report["contracts"] = contract_names(session)
     report["roles"] = {name: spec["role"] for name, spec in FLEET.items()}
+    flush_tracing()  # export the reasoning-chain spans before returning
     return report
 
 

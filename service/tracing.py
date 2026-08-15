@@ -47,3 +47,18 @@ def setup_tracing() -> str:
 
 def tracing_mode() -> str:
     return _MODE
+
+
+def flush_tracing() -> None:
+    """Force-export buffered spans now. Cloud Run throttles CPU between requests,
+    so the batch exporter's background thread may not run; flushing at the end of
+    a traced request exports the spans while CPU is still allocated."""
+    if _MODE != "cloud-trace":
+        return
+    try:
+        from opentelemetry import trace
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "force_flush"):
+            provider.force_flush()
+    except Exception:  # noqa: BLE001
+        pass
