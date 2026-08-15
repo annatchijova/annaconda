@@ -138,19 +138,23 @@ class MemoryCaseStore:
     def __init__(self):
         self._cases: dict[str, dict] = {}
 
-    def create_case(self, case_id: str, host: dict, examiner_id: str) -> dict:
+    def create_case(self, case_id: str, host: dict, examiner_id: str,
+                    demo: bool = False) -> dict:
         case = {
             "case_id": case_id, "host": host, "examiner_id": examiner_id,
             "created_utc": _now(), "updated_utc": _now(),
             "status": "open", "worst_verdict": None,
             "entries": [], "verdicts": [], "audit_trail": [], "runs": 0,
-            "open_question": None,
+            "open_question": None, "demo": demo,
         }
         self._cases[case_id] = case
         return case
 
     def get_case(self, case_id: str) -> Optional[dict]:
         return self._cases.get(case_id)
+
+    def delete_case(self, case_id: str) -> None:
+        self._cases.pop(case_id, None)
 
     def list_cases(self) -> list[dict]:
         rows = [_summarize(c) for c in self._cases.values()]
@@ -175,13 +179,14 @@ class FirestoreCaseStore:
         # factory can degrade to memory rather than crash on first request.
         next(iter(self._col.limit(1).stream()), None)
 
-    def create_case(self, case_id: str, host: dict, examiner_id: str) -> dict:
+    def create_case(self, case_id: str, host: dict, examiner_id: str,
+                    demo: bool = False) -> dict:
         case = {
             "case_id": case_id, "host": host, "examiner_id": examiner_id,
             "created_utc": _now(), "updated_utc": _now(),
             "status": "open", "worst_verdict": None,
             "entries": [], "verdicts": [], "audit_trail": [], "runs": 0,
-            "open_question": None,
+            "open_question": None, "demo": demo,
         }
         self._col.document(case_id).set(case)
         return case
@@ -189,6 +194,9 @@ class FirestoreCaseStore:
     def get_case(self, case_id: str) -> Optional[dict]:
         snap = self._col.document(case_id).get()
         return snap.to_dict() if snap.exists else None
+
+    def delete_case(self, case_id: str) -> None:
+        self._col.document(case_id).delete()
 
     def list_cases(self) -> list[dict]:
         rows = [_summarize(s.to_dict()) for s in self._col.stream()]

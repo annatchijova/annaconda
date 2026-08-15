@@ -119,6 +119,7 @@
         <div class="f"><label>Host</label><input id="cHost" value="FINANCE-WS-04" spellcheck="false"></div>
         <div class="f"><label>Examiner</label><input id="cExam" value="perito-01" spellcheck="false"></div>
         <button class="primary" id="createBtn">Open case</button>
+        <button class="ghost" id="resetBtn" title="Reset the showcase cases to a clean state">Reset demo</button>
       </div>
       <div id="queue"><div class="empty">Loading…</div></div>
     </div>
@@ -230,6 +231,13 @@ $("createBtn").onclick=async()=>{
     body:JSON.stringify({case_id,hostname,examiner_id})});
   if(r.ok){ await loadQueue(); openCase(case_id); }
   else{ const e=await r.json(); alert(e.detail||"could not open case"); }
+};
+
+$("resetBtn").onclick=async()=>{
+  $("resetBtn").disabled=true; $("resetBtn").textContent="Seeding…";
+  try{ await fetch("/demo/seed",{method:"POST"}); await loadQueue(); openCase("DEMO-ABSTAIN"); }
+  catch(e){ alert("reset failed: "+e.message); }
+  finally{ $("resetBtn").disabled=false; $("resetBtn").textContent="Reset demo"; }
 };
 
 loadQueue();

@@ -75,6 +75,27 @@ def test_empty_and_degenerate_inputs_are_safe():
     assert nom.nominate(events, "w") == []
 
 
+def test_nominator_floats_never_reach_the_seal():
+    """The determinism guarantee must hold WITH the nominator in the pipeline,
+    not just the core in isolation: the sealed entry_hash is byte-identical
+    across two fresh processes (different PYTHONHASHSEED) even though the
+    nominator computes floats in the same run."""
+    import subprocess
+    import sys
+    child = REPO / "tests" / "_seal_with_nominator_child.py"
+    digests = []
+    for hashseed in ("0", "77777"):
+        proc = subprocess.run(
+            [sys.executable, str(child)], cwd=REPO, capture_output=True,
+            text=True, timeout=120,
+            env={"PYTHONHASHSEED": hashseed, "PATH": "/usr/bin:/bin"})
+        assert proc.returncode == 0, proc.stderr[-2000:]
+        digests.append(proc.stdout.strip().splitlines()[-1])
+    assert digests[0] == digests[1], (
+        "the sealed hash changed with the nominator present — a float leaked "
+        f"into the sealed path ({digests[0][:12]} vs {digests[1][:12]})")
+
+
 def test_per_detector_quota_limits_one_facet():
     nom = SurprisalNominator(top_k=20, per_detector_quota=2)
     # Many events in unusual paths; quota should cap how many one detector

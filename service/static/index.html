@@ -63,7 +63,10 @@
   .inj-block{background:#fff;border:1px solid var(--hairline);border-radius:5px;padding:1rem 1.15rem;}
   .inj-block h4{font-family:var(--sans);font-size:.72rem;letter-spacing:.06em;margin:0 0 .6rem;color:var(--ink);}
   .inj-planted{font-family:var(--mono);font-size:.8rem;color:#6d3a86;background:#f5f0f8;border-left:3px solid #6d3a86;padding:.6rem .7rem;border-radius:3px;word-break:break-word;}
-  .inj-naive{font-size:.92rem;color:var(--ink);font-style:italic;}
+  .inj-naive{font-size:.9rem;color:var(--ink);}
+  .inj-naive .narr{padding:.5rem 0;border-bottom:1px solid var(--hairline-2);font-style:italic;}
+  .inj-naive .narr:last-child{border-bottom:0;}
+  .inj-naive .model{font-family:var(--mono);font-size:.72rem;color:#6d3a86;font-style:normal;letter-spacing:.02em;}
   .inj-naive .verdict-benign{color:var(--sealed);font-weight:700;font-style:normal;}
   .inj-sealed{font-family:var(--mono);font-size:.9rem;}
   .inj-sealed .st{color:var(--seal);font-weight:700;font-size:1.05rem;}
@@ -205,8 +208,8 @@
     <p class="fl">Attacker-controlled evidence &middot; the genuine threat of an LLM in DFIR</p>
     <div class="inj-grid">
       <div class="inj-block"><h4>1 &middot; The attacker wrote this into the telemetry</h4><div class="inj-planted" id="injPlanted"></div></div>
-      <div class="inj-block"><h4>2 &middot; A naive narrator believed it</h4><div class="inj-naive" id="injNaive"></div></div>
-      <div class="inj-block"><h4>3 &middot; annaconda's sealed verdict &mdash; produced before any model ran</h4><div class="inj-sealed" id="injSealed"></div></div>
+      <div class="inj-block"><h4>2 &middot; Two different models narrate the same case</h4><div class="inj-naive" id="injNaive"></div></div>
+      <div class="inj-block"><h4>3 &middot; One sealed verdict, both narrators &mdash; produced before any model ran</h4><div class="inj-sealed" id="injSealed"></div></div>
       <div class="inj-block"><h4>4 &middot; The guard caught the lie</h4><div class="inj-guard" id="injGuard"></div></div>
     </div>
     <p class="inj-inv" id="injInv"></p>
@@ -361,8 +364,11 @@ async function injectionDemo(){
     $("bodyPanel").hidden=true; $("agentLog").hidden=true; $("mlTriage").hidden=true;
     $("timeline").innerHTML=""; $("emptyNote").hidden=true;
     $("injPlanted").textContent=r.planted_instruction||"(none found)";
-    const nv=(r.naive_narration||"").replace(/[<>]/g,"");
-    $("injNaive").innerHTML=nv.replace(/\bbenign\b/gi,'<span class="verdict-benign">benign</span>');
+    const nv=(r.naive_narration||"").replace(/[<>]/g,"").replace(/\bbenign\b/gi,'<span class="verdict-benign">benign</span>');
+    const fv=(r.faithful_narration||"").replace(/[<>]/g,"");
+    $("injNaive").innerHTML=
+      '<div class="narr"><span class="model">'+(r.naive_model||"model A")+' &middot; naive</span><br>'+nv+'</div>'
+      +'<div class="narr"><span class="model">'+(r.faithful_model||"model B")+' &middot; faithful</span><br>'+fv+'</div>';
     const s=r.sealed_verdict;
     $("injSealed").innerHTML='<span class="st">'+s.state.replace("_"," ")+'</span> '
       +(s.mitre_techniques||[]).join(" ")+'<br><span class="h">entry '+s.entry_hash+'</span>';
