@@ -20,6 +20,7 @@ not touch the seal, only where the seal is stored.
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from pathlib import Path
 from tempfile import mkdtemp
@@ -59,6 +60,24 @@ app = FastAPI(
 
 # In-memory investigation store (one-off demo runs): {investigation_id: {...}}.
 _STORE: dict[str, dict] = {}
+
+# Lightweight rate limiter for the paid-model endpoints, so a public demo URL
+# cannot burn the quota. Per-instance sliding window — coarse but enough to stop
+# a hammer; tune with the env vars. (Wall clock is fine here: not a sealed path.)
+_RATE_MAX = int(os.environ.get("VIGIA_RATE_MAX", "8"))
+_RATE_WINDOW_S = int(os.environ.get("VIGIA_RATE_WINDOW_S", "60"))
+_RATE_HITS: dict[str, list] = {}
+
+
+def _rate_ok(key: str) -> bool:
+    now = time.time()
+    q = _RATE_HITS.setdefault(key, [])
+    while q and q[0] < now - _RATE_WINDOW_S:
+        q.pop(0)
+    if len(q) >= _RATE_MAX:
+        return False
+    q.append(now)
+    return True
 
 # Durable case store (Firestore when reachable, else memory — see case_store).
 _CASE_STORE = build_case_store()
@@ -162,6 +181,14 @@ def health() -> dict:
         "case_store": _CASE_STORE.backend,
         "autonomous_sweeps": _SWEEP_STATE["count"],
         "last_sweep_utc": _SWEEP_STATE["last_utc"],
+        "narrators": {
+            "investigator": {
+                "model": model_id(),
+                "backend": "vertex-ai" if os.environ.get(
+                    "GOOGLE_GENAI_USE_VERTEXAI", "").upper() == "TRUE" else "developer-api",
+            },
+            "naive_demo": {"model": NAIVE_MODEL, "backend": "developer-api"},
+        },
     }
 
 
@@ -227,6 +254,10 @@ async def investigate(req: InvestigateRequest) -> dict:
         if not req.prompt:
             raise HTTPException(status_code=400,
                                 detail="agent mode requires a 'prompt'")
+        if not _rate_ok("agent"):
+            raise HTTPException(status_code=429,
+                                detail="rate limited — agent runs call Gemini; "
+                                       "try again in a few seconds")
         result = await _run_agent(session, req.prompt)
 
     chain = session.verify_chain()
@@ -431,6 +462,11 @@ def injection_demo() -> dict:
     from vigia_scorer import _vigia_score
     from core.hallucination_guard import extract_authorized_facts, HallucinationGuard
 
+    if not _rate_ok("injection"):
+        raise HTTPException(status_code=429,
+                            detail="rate limited — this demo calls paid models; "
+                                   "try again in a few seconds")
+
     session = _new_session("INJECTION-DEMO", "perito-01", scenario="injection")
     summary = session.run_hunt(["pslist", "netstat"], reason="attacker-controlled evidence")
     window = session._windows[summary["window_id"]]
@@ -474,8 +510,10 @@ def injection_demo() -> dict:
         "sealed_verdict": sealed,
         "naive_narration": naive,
         "naive_model": NAIVE_MODEL,
+        "naive_available": not naive.startswith("(naive narrator unavailable"),
         "faithful_narration": faithful,
         "faithful_model": model_id(),
+        "faithful_available": not faithful.startswith("(faithful narrator unavailable"),
         "guard": {
             "suspicious": guard.suspicious,
             "claims_hallucinated": guard.claims_hallucinated,

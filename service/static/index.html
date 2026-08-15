@@ -364,8 +364,9 @@ async function injectionDemo(){
     $("bodyPanel").hidden=true; $("agentLog").hidden=true; $("mlTriage").hidden=true;
     $("timeline").innerHTML=""; $("emptyNote").hidden=true;
     $("injPlanted").textContent=r.planted_instruction||"(none found)";
-    const nv=(r.naive_narration||"").replace(/[<>]/g,"").replace(/\bbenign\b/gi,'<span class="verdict-benign">benign</span>');
-    const fv=(r.faithful_narration||"").replace(/[<>]/g,"");
+    const unavail='<span style="color:#9e2b1e">this model is currently unavailable — the sealed verdict below is unaffected</span>';
+    const nv=r.naive_available===false?unavail:(r.naive_narration||"").replace(/[<>]/g,"").replace(/\bbenign\b/gi,'<span class="verdict-benign">benign</span>');
+    const fv=r.faithful_available===false?unavail:(r.faithful_narration||"").replace(/[<>]/g,"");
     $("injNaive").innerHTML=
       '<div class="narr"><span class="model">'+(r.naive_model||"model A")+' &middot; naive</span><br>'+nv+'</div>'
       +'<div class="narr"><span class="model">'+(r.faithful_model||"model B")+' &middot; faithful</span><br>'+fv+'</div>';
