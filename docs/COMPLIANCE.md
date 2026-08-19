@@ -102,6 +102,26 @@ what makes autonomy defensible.
 So the blast radius of a compromised or manipulated agent is bounded to *what
 gets investigated and when*. It cannot reach *what the evidence means*.
 
+**And what it says is checked against what was sealed.** An agent working
+unattended can escalate or narrate at any point in a cycle — including after a
+collection failed and nothing was adjudicated at all. Two mechanical checks,
+neither of them another model:
+
+- Every escalation carries a `sealed_basis`: the verdict states and entry
+  hashes the cycle actually sealed, read from the adjudicated record by the
+  tool itself. The agent cannot supply, inflate, or suppress it. An escalation
+  that rests on nothing is recorded with `unsupported_by_seal: true` rather
+  than refused — refusing could strand a real incident; what it must not do is
+  look supported.
+- Escalation text and the closing narration are compared against the sealed
+  verdict states of that cycle. A verdict named in prose but never sealed is
+  reported as `unsealed_verdict_claims` and shown on the fleet console.
+
+`tests/test_commander_loop.py` drives the real ADK loop with a scripted model to
+exercise exactly this: a commander that escalates citing `MALICE_HIGH` after a
+failed collection, and one that narrates `BENIGN_HIGH` over a sealed
+`MALICE_HIGH`. Both are flagged; neither moves a seal.
+
 ---
 
 ## Data residency — what is and is not covered
@@ -141,6 +161,13 @@ but it is not done here and should not be claimed.
   IAM plus an identity token), not from a request body. As it stands, the
   catalog is a working authorisation mechanism with an unauthenticated
   principal — the gate is real, the identity behind it is asserted.
+- **Gemini's own behaviour is not tested here.** The ADK loop is —
+  `tests/test_commander_loop.py` runs it end to end against a scripted
+  `BaseLlm` that reads real tool results from the transcript, so tool
+  declarations, function-call dispatch, result feedback, fallback on model
+  failure and the seal checks all run in CI. What no offline test can cover is
+  whether the live model chooses well. The architecture is built so that a bad
+  choice costs a wasted collection, not a wrong verdict.
 - **The trust boundary of the evidence itself** is unchanged and examined in
   [RED_TEAM_AUDIT.md](RED_TEAM_AUDIT.md): a sealed verdict certifies
   reproducible adjudication of the *collected* evidence, not the truth of that

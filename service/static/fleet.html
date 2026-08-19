@@ -65,6 +65,9 @@
     background:var(--legal);border-radius:3px;padding:.2rem .4rem;height:fit-content;text-align:center;}
   .role.hunter{background:#3d6b8a;} .role.correlator{background:var(--sealed);}
   .role.commander{background:var(--purple);} .role.refused{background:var(--seal);}
+  .flag{display:inline-block;font-family:var(--sans);font-size:.62rem;letter-spacing:.04em;
+    color:var(--seal-deep);background:#fdf0ee;border:1px solid var(--seal);border-radius:3px;
+    padding:.1rem .38rem;margin-left:.3rem;}
   .what{font-size:.85rem;}
   .what .act{font-family:var(--mono);font-size:.74rem;color:var(--legal);}
   .what .dt{color:var(--ink-soft);font-size:.8rem;}
@@ -187,8 +190,16 @@ function describe(e){
       return `${esc(e.status)} ${esc(e.id)} — <span class="dt">${esc(e.rationale)}</span>`;
     case "schedule_next_cycle":
       return `scheduled the next cycle for <span class="mono">${esc(e.due_utc)}</span> — <span class="dt">${esc(e.why)}</span>`;
-    case "escalate_to_human":
-      return `<b>escalated to a human</b> — <span class="dt">${esc(e.why)}. Check: ${esc(e.what_to_check)}</span>`;
+    case "escalate_to_human": {
+      const flags = [];
+      if(e.unsupported_by_seal) flags.push("rests on no sealed verdict");
+      if(e.unsealed_verdict_claims && e.unsealed_verdict_claims.length)
+        flags.push(`names ${e.unsealed_verdict_claims.map(esc).join(", ")}, never sealed`);
+      return `<b>escalated to a human</b> — <span class="dt">${esc(e.why)}. Check: ${esc(e.what_to_check)}</span>` +
+             (flags.length ? ` <span class="flag">⚠ ${flags.join(" · ")}</span>` : "");
+    }
+    case "narration_unsupported":
+      return `<b>narration checked against the seal</b> — <span class="dt">${esc(e.detail)}</span>`;
     case "stand_down":
       return `<b>stood down</b> — <span class="dt">${esc(e.rationale)}</span>`;
     case "agent_turn_failed":
@@ -226,6 +237,9 @@ function renderCycle(body){
       <dt>Memory chain</dt><dd>${c.memory.memory_ok
         ? `<span class="ok">verified</span> <span class="dt">(${c.memory.journal_entries} entries)</span>`
         : `<span class="bad">BROKEN</span>`}</dd>
+      <dt>Narration vs seal</dt><dd>${(c.unsealed_verdict_claims || []).length
+        ? `<span class="bad">names ${c.unsealed_verdict_claims.map(esc).join(", ")}</span> <span class="dt">— not sealed by this cycle</span>`
+        : `<span class="ok">no verdict claimed that was not sealed</span>`}</dd>
     </dl>
     <div style="margin-top:1rem">${steps}</div>`;
 }
@@ -254,7 +268,13 @@ function renderMission(m){
         : (m.standing_down ? `<b>stood down</b> <span class="dt">— ${esc(m.standing_down.rationale)}</span>`
                            : `<span class="empty">not scheduled</span>`)}</dd>
       <dt>Escalation</dt><dd>${m.escalation
-        ? `<b>${esc(m.escalation.why)}</b> <span class="dt">— check: ${esc(m.escalation.what_to_check)}</span>`
+        ? `<b>${esc(m.escalation.why)}</b> <span class="dt">— check: ${esc(m.escalation.what_to_check)}</span>` +
+          (m.escalation.sealed_basis && m.escalation.sealed_basis.length
+            ? `<div class="dt">resting on ${m.escalation.sealed_basis.map(b =>
+                `<span class="mono">${esc(b.verdict_state)}</span> <span class="mono">${esc((b.entry_hash||"").slice(0,12))}…</span>`).join(", ")}</div>`
+            : `<div><span class="flag">⚠ rests on no sealed verdict</span></div>`) +
+          ((m.escalation.unsealed_verdict_claims || []).length
+            ? `<div><span class="flag">⚠ names ${m.escalation.unsealed_verdict_claims.map(esc).join(", ")}, never sealed</span></div>` : "")
         : `<span class="empty">none raised</span>`}</dd>
     </dl>`;
 }

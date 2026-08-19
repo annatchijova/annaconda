@@ -122,6 +122,17 @@ fleet keeps for weeks is memory an attacker has weeks to edit, so every mutation
 seals a journal entry onto the previous one with the same SHA-256 recipe that
 seals verdicts; `GET /cases/{id}/mission` re-verifies the chain on every read.
 
+**What the fleet says is checked against what it sealed.** Every escalation
+carries the verdict states and entry hashes the cycle actually sealed, read from
+the adjudicated record by the tool itself — the agent cannot supply or suppress
+it — and an escalation resting on nothing is recorded as such. The closing
+narration is compared the same way: a verdict named in prose but never sealed is
+flagged on the console. Both checks are mechanical comparisons, not a second
+model. The real ADK loop is driven by a scripted model in CI
+(`tests/test_commander_loop.py`) precisely to exercise the ugly cases — a
+commander escalating after a failed collection, and one narrating `BENIGN_HIGH`
+over a sealed `MALICE_HIGH`.
+
 And memory cannot reach the verdict. Nothing in it is an input to the case's
 status, which is computed from the sealed chain alone — a test fills memory with
 the most persuasive lie available (every hypothesis refuted, a stand-down

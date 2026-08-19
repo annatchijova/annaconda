@@ -105,6 +105,13 @@ plainly — do not try to work around it.
 """
 
 
+def sealed_verdicts(session: PurpleTeamSession) -> list:
+    """What this session actually sealed, read from the investigation's own
+    audit trail. The single source for any claim about a verdict."""
+    return [e["detail"] for e in session.audit_trail
+            if e["action"] == "adjudicate" and "verdict_state" in e["detail"]]
+
+
 def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
                     *, department: str = COMMANDER_DEPARTMENT,
                     log_sink: Optional[list] = None) -> list:
@@ -224,11 +231,17 @@ def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
         necessary and what they should look at first."""
         try:
             esc = mem.escalate(mission, actor=COMMANDER_NAME, why=why,
-                               what_to_check=what_to_check)
+                               what_to_check=what_to_check,
+                               # Read from the adjudicated record, not from the
+                               # caller: the agent has no way to state, inflate
+                               # or hide what was actually sealed.
+                               sealed_basis=sealed_verdicts(session))
         except mem.MissionError as exc:
             return {"error": str(exc)}
         _note(COMMANDER_NAME, "escalate_to_human", why=esc["why"],
-              what_to_check=esc["what_to_check"])
+              what_to_check=esc["what_to_check"],
+              unsupported_by_seal=esc["unsupported_by_seal"],
+              unsealed_verdict_claims=esc["unsealed_verdict_claims"])
         return esc
 
     def stand_down(rationale: str) -> dict:
@@ -387,7 +400,10 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
     narration = None
     error = None
 
-    if model_reachable():
+    # An explicitly supplied model is used whatever the environment says: the
+    # credential check exists for the cron on a machine that may have none, and
+    # a caller that handed us a model has already answered that question.
+    if model is not None or model_reachable():
         try:
             narration = await _run_commander_turn(
                 session, case, mission, department=department,
@@ -422,8 +438,16 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
         events.append({"role": COMMANDER_NAME, "action": "default_schedule_applied",
                        "detail": "the cycle set no next step; applied 24h"})
 
-    verdicts = [e["detail"] for e in session.audit_trail
-                if e["action"] == "adjudicate"]
+    verdicts = sealed_verdicts(session)
+    # The narration is the agent's own words about a cycle it just ran. It is
+    # stored beside the sealed record, never inside it — and checked against it
+    # mechanically, so a cycle that sealed nothing cannot report a verdict.
+    invented = mem.unsealed_verdict_claims(
+        narration or "", [v["verdict_state"] for v in verdicts])
+    if invented:
+        events.append({"role": COMMANDER_NAME, "action": "narration_unsupported",
+                       "detail": f"the narration names {', '.join(invented)}, "
+                                 f"which this cycle did not seal"})
     return {
         "acted": True,
         "case_id": case["case_id"],
@@ -434,6 +458,7 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
         "fleet_log": events,
         "verdicts": verdicts,
         "narration": narration,
+        "unsealed_verdict_claims": invented,
         "next_action": mission.get("next_action"),
         "escalation": mission.get("escalation"),
         "standing_down": mission.get("standing_down"),

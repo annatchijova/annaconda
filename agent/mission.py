@@ -321,18 +321,72 @@ def schedule_next_action(mission: dict, *, actor: str, action: str,
     return entry
 
 
-def escalate(mission: dict, *, actor: str, why: str, what_to_check: str) -> dict:
+# Every quadripartite state the engine can seal. Used to spot a verdict named
+# in an agent's prose — the only way to tell "MALICE_HIGH" as a report of a
+# sealed fact from "MALICE_HIGH" as something the model produced.
+_VERDICT_TOKENS = (
+    "MALICE_HIGH", "MALICE_MEDIUM", "BENIGN_HIGH", "BENIGN_MEDIUM",
+    "ABSTAIN_CONTRADICTION", "ABSTAIN_INSUFFICIENT", "ABSTAIN_DEGRADED",
+    "ESCALATE",
+)
+
+
+def unsealed_verdict_claims(text: str, sealed_states) -> list:
+    """Verdict states named in ``text`` that are not in ``sealed_states``.
+
+    A mechanical comparison against the sealed record — not another model
+    judging the first one. This is the same discipline the narration guard
+    applies to a verdict's description, moved to where an autonomous cycle
+    needs it: an agent working unattended can escalate or narrate at any point,
+    including after a collection failed and nothing was adjudicated at all.
+
+    Empty result means every verdict the text names was actually sealed. It
+    does not mean the text is true — only that it invented no verdict.
+    """
+    if not isinstance(text, str) or not text:
+        return []
+    upper = text.upper()
+    sealed = {str(s).upper() for s in sealed_states or ()}
+    named = [t for t in _VERDICT_TOKENS if t in upper]
+    # MALICE_HIGH contains no other token, but ESCALATE is a substring of
+    # nothing and ABSTAIN_* share a prefix — compare whole tokens only.
+    return sorted({t for t in named if t not in sealed})
+
+
+def escalate(mission: dict, *, actor: str, why: str, what_to_check: str,
+             sealed_basis=()) -> dict:
     """Hand the case to a human, with the reasoning that made it necessary.
 
     Escalation is an operational decision — "this needs a person" — not an
     adjudication. It changes who looks next; it does not change the verdict.
+
+    ``sealed_basis`` is what the cycle actually sealed, supplied by the caller
+    from the adjudicated record. The agent cannot pass it, suppress it, or
+    edit it. An escalation therefore always arrives beside the sealed facts,
+    and an escalation that rests on nothing says so — which matters most in
+    the case that produced this parameter: a cycle whose collection failed,
+    whose adjudication never ran, and whose commander escalated anyway,
+    citing a verdict that was never reached.
     """
+    basis = [
+        {"verdict_state": str(v.get("verdict_state", "")),
+         "entry_hash": str(v.get("entry_hash", "")),
+         "sequence": v.get("sequence")}
+        for v in (sealed_basis or ()) if isinstance(v, dict)
+    ]
+    sealed_states = [b["verdict_state"] for b in basis if b["verdict_state"]]
     entry = {
         "why": _text(why, "why"),
         "what_to_check": _text(what_to_check, "what_to_check"),
         "raised_at_cycle": mission.get("cycles", 0),
         "raised_utc": _now(),
         "acknowledged": False,
+        # The sealed facts this escalation rests on, and whether its own words
+        # stayed inside them.
+        "sealed_basis": basis,
+        "unsupported_by_seal": not basis,
+        "unsealed_verdict_claims": unsealed_verdict_claims(
+            f"{why} {what_to_check}", sealed_states),
     }
     mission["escalation"] = entry
     record(mission, actor=actor, action="escalate_to_human", detail=dict(entry))
