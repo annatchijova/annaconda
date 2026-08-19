@@ -75,12 +75,26 @@ curl -s -X POST "$URL/investigate" -H 'Content-Type: application/json' \
        "prompt":"Run a baseline sweep, adjudicate it, give the sealed verdict."}'
 ```
 
-## Autonomous operation (runs without a human)
+## Autonomous operation (runs without a human, and decides while it runs)
 
 Cloud Scheduler publishes to a Pub/Sub topic on a cron; a push subscription
-delivers to `/tasks/sweep`, which continues hunts on open cases — appending a
-sealed window to each case's chain with nobody pressing a button. `/health`
-reports `autonomous_sweeps` and `last_sweep_utc`.
+delivers to `/tasks/sweep`, which wakes the fleet. Every case that is *due* gets
+one autonomous cycle: the commander reads the case's mission memory, tasks the
+specialists it is cleared to task, adjudicates through the deterministic engine,
+and sets its own next wake-up.
+
+The cron is only the wake-up — the cadence is per case, decided by the fleet, so
+a 15-minute schedule does not mean a 15-minute collection interval on every
+host. `/health` reports `autonomous_sweeps`, `autonomous_cycles`,
+`cases_worked_last_sweep`, `cases_not_due_last_sweep` and `escalations_raised`.
+
+To watch one cycle without waiting for the cron, use `/fleet-console`, or:
+
+```bash
+curl -X POST "$URL/cases/<case-id>/cycle" -H 'content-type: application/json' \
+     -d '{"department":"incident-response"}'
+curl "$URL/cases/<case-id>/mission"      # the memory it left for the next cycle
+```
 
 ```bash
 gcloud pubsub topics create annaconda-sweeps --project <project>

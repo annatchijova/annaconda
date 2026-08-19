@@ -316,6 +316,23 @@ def plan_deterministically(session: PurpleTeamSession, case: dict,
         verdict = tools["request_adjudication"](summary["window_id"])
         if "error" in verdict:
             verdict = None
+    else:
+        # A collection that failed is a finding, not a quiet host. Saying
+        # nothing here would let the next cycle read "no open lead" and treat
+        # an endpoint it could not see as one it saw and found clean.
+        mem.note_open_question(
+            mission, actor=COMMANDER_NAME,
+            question=f"{target} could not collect from this host: "
+                     f"{summary['error']}",
+            what_would_resolve="a successful collection of the same surface, "
+                               "or confirmation that the artifact is "
+                               "unavailable on this endpoint")
+        tools["schedule_next_cycle"](
+            action=f"retry the {target} collection",
+            in_hours=2,
+            why="the last collection failed, so this host is unobserved — not "
+                "observed and quiet")
+        return
 
     state = (verdict or {}).get("verdict_state", "")
     unresolved = brief.get("unresolved_questions", [])

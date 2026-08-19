@@ -21,7 +21,9 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from agent.mission import new_mission
+from agent.mission import (
+    load_mission, new_mission, note_open_question, resolve_open_question,
+)
 
 log = logging.getLogger("annaconda.case_store")
 
@@ -97,6 +99,13 @@ _ABSTAIN_MEMORY = {
 }
 
 
+def _mission_of(case: dict) -> dict:
+    """The case's mission, attached (and migrated) if it is not there yet."""
+    mission = load_mission(case)
+    case["mission"] = mission
+    return mission
+
+
 def _update_open_question(case: dict, verdicts: list) -> None:
     """Turn ABSTAIN into memory and reentry. Opens a question when a run cannot
     conclude; resolves it when a later run reaches a definitive verdict."""
@@ -114,10 +123,22 @@ def _update_open_question(case: dict, verdicts: list) -> None:
             "opened_at_run": case.get("runs", 0), "resolved": False,
             "resolved_at_run": None, "resolved_verdict": None,
         }
+        # The fleet reads mission memory, not this field: an ABSTAIN that only
+        # existed here would be invisible to the next autonomous cycle, which
+        # would then re-collect blind instead of pursuing the missing evidence.
+        note_open_question(_mission_of(case), actor="adjudication",
+                           question=f"{abstained}: {why}",
+                           what_would_resolve=resolves)
     elif concluded and q is not None and not q.get("resolved"):
         q["resolved"] = True
         q["resolved_at_run"] = case.get("runs", 0)
         q["resolved_verdict"] = concluded
+        mission = _mission_of(case)
+        for mq in mission.get("open_questions", []):
+            if not mq.get("resolved") and mq["question"].startswith(q["state"]):
+                resolve_open_question(
+                    mission, actor="adjudication", question_id=mq["id"],
+                    how=f"a later run reached {concluded}")
         # Reflect the conclusion the reentry reached — but NEVER downgrade a case
         # that already has a worse verdict in its history. A case whose worst is
         # MALICE must never display "benign" just because a later partial

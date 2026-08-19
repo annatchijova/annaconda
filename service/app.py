@@ -176,6 +176,12 @@ def console_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "cases.html")
 
 
+@app.get("/fleet-console", include_in_schema=False)
+def fleet_page() -> FileResponse:
+    """The autonomous fleet: the enterprise catalog, and one cycle on demand."""
+    return FileResponse(STATIC_DIR / "fleet.html")
+
+
 @app.get("/architecture", include_in_schema=False)
 def architecture_page() -> FileResponse:
     """End-to-end architecture walkthrough."""

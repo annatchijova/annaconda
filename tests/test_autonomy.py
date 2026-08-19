@@ -169,3 +169,37 @@ def test_the_commanders_department_is_published_to_task_what_it_needs():
         catalog.authorize(specialist,
                           department=autonomy.COMMANDER_DEPARTMENT,
                           data_classes=[])
+
+
+def test_a_failed_collection_is_not_reported_as_a_quiet_host():
+    """The honest-degradation case. The 'insufficient' fixture has no netstat,
+    so the collection fails. A cycle that shrugged and scheduled the long
+    'quiet host' interval would let the next cycle read an unobserved endpoint
+    as an observed clean one."""
+    INSUFFICIENT = REPO / "tests" / "fixtures" / "insufficient"
+    case = _case("AUTO-FAIL")
+    result = _cycle(_session(INSUFFICIENT, "AUTO-FAIL"), case)
+    assert any(e["action"] == "collect_failed" for e in result["fleet_log"])
+    assert not result["verdicts"]
+    plan = result["next_action"]
+    assert plan["in_hours"] <= 2, "an unobserved host got a quiet-host interval"
+    assert "unobserved" in plan["why"]
+    questions = [q["question"] for q in case["mission"]["open_questions"]]
+    assert any("could not collect" in q for q in questions), questions
+
+
+def test_an_abstain_question_reaches_the_fleets_memory():
+    """ABSTAIN-as-memory has to be memory the *fleet* reads, not a field only
+    the UI renders — otherwise the next cycle re-collects blind."""
+    from service.case_store import MemoryCaseStore
+
+    store = MemoryCaseStore()
+    case = store.create_case("AB-1", HOST, "perito")
+    store.apply_run("AB-1", [], [{"verdict_state": "ABSTAIN_INSUFFICIENT"}], [])
+    questions = [q["question"] for q in case["mission"]["open_questions"]]
+    assert any(q.startswith("ABSTAIN_INSUFFICIENT") for q in questions), questions
+    assert mem.brief(case["mission"])["unresolved_questions"]
+
+    # and a later definitive run closes it in memory too
+    store.apply_run("AB-1", [], [{"verdict_state": "BENIGN_HIGH"}], [])
+    assert not mem.brief(case["mission"])["unresolved_questions"]
