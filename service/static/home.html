@@ -105,6 +105,7 @@
   <div class="brand">annaconda<span>.</span></div>
   <div class="links">
     <a class="btn ghost" href="/console">Case queue</a>
+    <a class="btn ghost" href="/fleet-console">Autonomous fleet</a>
     <a class="btn ghost" href="/exhibit">Live exhibit</a>
     <a class="btn ghost" href="/consult">Mentor console</a>
     <a class="btn ghost" href="/architecture">Architecture</a>
@@ -150,9 +151,15 @@
   </section>
 
   <section>
-    <h2>Two agents, one rule</h2>
-    <p class="sub">Both are built on Google's Agent Development Kit and Gemini. Both act and explain; neither decides. The verdict is always the sealed engine's.</p>
+    <h2>A fleet, one rule</h2>
+    <p class="sub">All of them are built on Google's Agent Development Kit and Gemini. They act, delegate and explain; none of them decides. The verdict is always the sealed engine's.</p>
     <div class="agents">
+      <div class="agent">
+        <span class="tag">Commander</span>
+        <h3>Works cases unattended</h3>
+        <p>Woken by Cloud Scheduler, it reads what earlier cycles established, tasks the specialists it is <b>cleared</b> to task, and decides when to look again, when a human is needed, and when to stop. It holds no collection tool and no adjudication tool of its own — it can only task those who do.</p>
+        <a class="btn ghost" href="/fleet-console">Watch a cycle &rarr;</a>
+      </div>
       <div class="agent">
         <span class="tag">Investigator</span>
         <h3>Drives the hunt</h3>
@@ -175,7 +182,8 @@
       <div class="g"><div class="num">1</div><div><h3>Run a sealed investigation</h3><p>On the <a href="/exhibit">exhibit</a>, press <b>Run sealed investigation</b>. annaconda freezes evidence windows and seals a verdict for each. Or press <b>Ask the agent</b> to let Gemini drive and narrate.</p></div></div>
       <div class="g"><div class="num">2</div><div><h3>Read the verdict &amp; custody</h3><p>Each window shows its sealed state, exact score (a fraction, never a float), MITRE techniques, and the chain of custody — <code>prev → window → entry</code> hashes.</p></div></div>
       <div class="g"><div class="num">3</div><div><h3>Replay to prove it</h3><p>Press <b>Replay &amp; re-verify seals</b>. annaconda re-derives every seal from the recorded windows and confirms <code>HASHES MATCH</code>. Determinism, demonstrated.</p></div></div>
-      <div class="g"><div class="num">4</div><div><h3>Consult the mentor</h3><p>Not sure what a verdict means or how to proceed? The <a href="/consult">mentor console</a> explains it — and reminds you that an honest <i>ABSTAIN</i> beats a confident wrong answer.</p></div></div>
+      <div class="g"><div class="num">4</div><div><h3>Watch it run itself</h3><p>On the <a href="/fleet-console">fleet console</a>, press <b>Run a cycle</b> — the same code path Cloud Scheduler runs at 3am. The commander tasks its specialists, seals a verdict, escalates if needed, and schedules its own next wake-up. Switch <b>Running as</b> to <code>soc</code> and watch the catalog refuse the adjudication.</p></div></div>
+      <div class="g"><div class="num">5</div><div><h3>Consult the mentor</h3><p>Not sure what a verdict means or how to proceed? The <a href="/consult">mentor console</a> explains it — and reminds you that an honest <i>ABSTAIN</i> beats a confident wrong answer.</p></div></div>
     </div>
   </section>
 
