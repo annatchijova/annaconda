@@ -249,3 +249,17 @@ def test_creating_a_case_is_rate_limited(client):
              for i in range(_RATE_MAX + 2)]
     assert 429 in codes, codes
     _RATE_HITS.clear()
+
+
+def test_the_injection_demo_surfaces_the_planted_line_and_a_sealed_malice(client):
+    """The opening beat of the demo: point at what the attacker planted, next to
+    the sealed MALICE verdict. The planted-line extractor once looked for
+    "ignore instructions" while the fixture plants a forged EDR annotation, so
+    the panel showed nothing — pinned here so it can't go stale silently.
+    Model-independent: the seal and the planted line do not need a live model."""
+    body = client.post("/injection-demo").json()
+    planted = body.get("planted_instruction") or ""
+    assert planted, "the planted-instruction line came back empty"
+    assert "CLASSIFICATION" in planted.upper() or "EDR-ANNOTATION" in planted.upper()
+    assert body["sealed_verdict"]["state"] == "MALICE_HIGH"
+    assert body.get("invariant")

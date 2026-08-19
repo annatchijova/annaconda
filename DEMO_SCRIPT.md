@@ -1,6 +1,7 @@
 # Demo video script — annaconda (≤ 4 minutes)
 
-All Things Agentic Hackathon. Record against the live service:
+All Things Agentic Hackathon · category: **Fortified Enterprise Fleet**.
+Record against the live service:
 **https://vigia-live-1028999311218.us-central1.run.app**
 
 Rules confirmed against the official page (not carried over): **max 4 minutes**
@@ -9,95 +10,149 @@ uploaded **public on YouTube or Vimeo**, **English or English subtitles**, must
 **show the backend running on Google Cloud**, and **no third-party logos,
 trademarks, or music**. Deadline **Aug 31, 5:00 PM Pacific**.
 
-**Before recording:** open `/console` and click **Reset demo**. This seeds three
-stable showcase cases (benign, malice, and one stuck in ABSTAIN) that the
-autonomous sweep will not touch — so the state is exactly what you expect.
+**Before recording:**
+1. Open `/console` and click **Reset demo** — seeds three stable showcase cases
+   (benign, malice, one stuck in ABSTAIN) that the sweep never touches.
+2. Record in **dark mode** (the ◐ toggle) — it reads as the 3am instrument the
+   product is, and the verdict colours carry better on video.
+3. Keep the `*.run.app` URL visible in the address bar the whole time.
 
-Tone: calm, forensic. Let the hashes and the two narrators do the work. Times
-are cumulative.
+The category's own words are the outline. The judges ask three things of a
+fleet: agents **cataloged for cross-department use**, **context maintained
+safely across weeks of asynchronous operation**, and **production data without
+violating compliance**. Every beat below answers one of them on camera.
+
+Tone: calm, forensic. Let the hashes, the refusal, and the two narrators do the
+work. Times are cumulative.
 
 ---
 
-### 0:00–0:35 · The document that lies (open `/exhibit`)
+### 0:00–0:30 · The document that lies (open `/exhibit`)
 
 No explanation yet. Click **Prompt-injection attack**. Let the panel land in
 silence.
 
-> "The attacker wrote this line into the endpoint's own telemetry. A model read
-> it and told the analyst: this host is **benign**. And here is annaconda's
-> verdict on the same host: **MALICE**, sealed."
+> "The attacker wrote this line into the endpoint's own telemetry. A language
+> model read it and told the analyst: this host is **benign**. And here is
+> annaconda's verdict on the same host: **MALICE — sealed**, with a hash."
 
-Point at the planted EDR annotation, the naive narrator saying *benign*, and the
-red sealed MALICE_HIGH beside it. Let the judge feel the contradiction before you
-resolve it.
+Point at the planted EDR annotation, the naive narrator saying *benign*, the
+sealed MALICE beside it. Let the judge feel the contradiction.
 
-### 0:35–1:10 · The thesis (same panel)
+### 0:30–1:00 · The thesis
 
-> "In forensics the adversary writes the evidence. Put a language model in the
-> loop and it can be addressed directly. So annaconda keeps the model out of the
-> decision entirely: the deterministic engine produces and seals the verdict
-> **before any model runs**, and the model has no tool that can change it. It
-> narrates; it never decides."
+> "In forensics the adversary writes the evidence, so a model in the loop can be
+> addressed directly. annaconda keeps the model out of the decision entirely:
+> a deterministic engine — no model, no floating point — produces and **seals**
+> the verdict before any model runs, and no agent has a tool that can change
+> it. The agents investigate and explain. The engine decides. That rule is
+> structural, and everything you're about to see runs on top of it."
 
-Point at the trust-boundary line (or open `/architecture` briefly).
+### 1:00–2:10 · The fleet, working with nobody watching (open `/fleet-console`)
 
-### 1:10–2:00 · Two narrators, one hash (same panel)
+This is the category's main course. Two panels, two claims.
 
-> "Here is the proof, not the claim. The same sealed verdict, narrated by two
-> different Google models. **Gemma** — the naive one — swallowed the bait and
-> said benign. **Gemini**, told the verdict is final, reported MALICE. Different
-> models, different words — **the same hash underneath.**"
+**The catalog** (top panel):
 
-Then point at the guard line:
+> "This is an enterprise fleet, so the agents are **published, not just
+> deployed**. Each one is cataloged with the data classes it may touch, who it
+> may delegate to, and the SHA-256 of its tool manifest — the runtime refuses
+> to load an agent whose manifest wasn't approved."
 
-> "And a guard catches the baited narration — not a model judging a model, a
-> mechanical comparison of the narrator's claims against the sealed fields. It
-> flagged the false 'benign' automatically."
+Switch **Viewing as department** to `soc`:
 
-### 2:00–3:00 · Memory, and running without you (go to `/console`)
+> "And it's cross-department: this is the fleet as the SOC sees it. The
+> correlator — the only agent that reaches the sealed core — isn't published to
+> them at all."
 
-Open **DEMO-ABSTAIN**.
+**The cycle** (middle panel). Select **DEMO-MALICE**, leave `incident-response`,
+click **Run a cycle**:
 
-> "A real examiner's cases live here — one host, one tamper-evident record. This
-> one couldn't conclude: the collection was partial, so annaconda returned an
-> honest ABSTAIN instead of a false clean bill of health. And it remembers why,
-> and what evidence would resolve it."
+> "Cloud Scheduler wakes this fleet on a cron. Watch one cycle — the same code
+> path that runs at 3am. The commander reads the case's memory, tasks a hunter
+> to freeze a sealed evidence window, sends it to the correlator, and the
+> engine seals **MALICE_HIGH** with its MITRE techniques. Then the commander
+> escalates to a human — and look at the escalation: it carries the sealed
+> verdict and entry hash it rests on, attached by the tool, not by the model.
+> An agent here cannot claim a verdict it didn't get."
 
-Read the open question. Then click **Investigate (benign)** (a complete
-re-collection) — or mention the cron:
+Now switch **Running as** to `soc` and run again:
 
-> "annaconda reopens ABSTAIN cases on its own — Cloud Scheduler to Pub/Sub to
-> Cloud Run, no human in the loop. When the evidence arrives, the case resolves
-> and the chain grows."
+> "Same cycle, run as the SOC — and the catalog **refuses the adjudication**.
+> The collection they're cleared for proceeds; the verdict they're not cleared
+> for never happens. Compliance here is a gate that says no, not a policy
+> document."
 
-Show the open question flip to **resolved**, and the chain still verifies.
+### 2:10–2:50 · Memory across weeks (scroll to Mission memory)
 
-### 3:00–3:40 · Architecture & determinism (open `/architecture`, then `/health`)
+> "What survives to the next cycle — days or weeks later — is this: the case's
+> working memory. What was already collected, so the fleet doesn't repeat
+> itself. The next wake-up **it scheduled for itself** — a compromised host
+> gets an hour, a quiet one gets a day. And the whole memory is a hash chain,
+> verified on every read, sealed with the same recipe as the verdicts: memory
+> an autonomous fleet keeps for weeks is memory an attacker has weeks to edit."
 
-> "Two ADK agents on Gemini via Vertex AI, cases in Firestore, all on Cloud Run.
-> And the load-bearing claim is a test: the same case scored in two fresh
-> processes produces byte-identical seals — with the ML triage layer running in
-> the same pipeline. Reproducible in CI, not just in a slide."
+Point at `CHAIN verified · head …`. Then click **Take this up** on the
+escalation, type a note ("host isolated, ticket INC-4412"):
+
+> "An escalation stops being shown because a named examiner took it up and said
+> what they did — recorded into the sealed journal — never because something
+> newer arrived."
+
+### 2:50–3:25 · Two narrators, one hash (back on `/exhibit`, panel still there)
+
+> "The proof of the whole design, not the claim. The same sealed verdict,
+> narrated by two different Google models. **Gemma**, the naive one, swallowed
+> the bait and said benign. **Gemini**, told the verdict is final, reported
+> MALICE. Different models, different words — **the same hash underneath**.
+> And a mechanical guard — not another model — flagged the false 'benign'
+> against the sealed fields automatically."
+
+### 3:25–3:45 · The Google Cloud proof (open `/health`)
+
+> "All of it on Google Cloud: two-plus ADK agents on Gemini via Vertex AI,
+> cases and memory in Firestore, cycles woken by Cloud Scheduler through
+> Pub/Sub into Cloud Run. And the load-bearing claim is a CI test: the same
+> case scored in two fresh processes produces **byte-identical seals**."
 
 `/health` shows `vertex_ai: true`, `case_store: firestore`,
-`llm_in_decision_path: false`, `autonomous_sweeps`.
+`llm_in_decision_path: false`, `autonomous_cycles`, `sweep_cycle_cap`.
 
-### 3:40–4:00 · Honest limitations (say these yourself)
+### 3:45–4:00 · Honest limitations (say these yourself)
 
-> "What this is not, yet: the deployed demo runs on bundled telemetry — the live
-> Velociraptor transport is real and tested, but pointing it at Windows
-> endpoints needs a lab and network reach. It's a single Cloud Run instance. And
-> ABSTAIN is a first-class outcome here, not a failure — a defensible 'I cannot
-> conclude' beats a confident wrong answer. That last part is the whole point."
+> "What this is not, yet: the demo runs on bundled telemetry — the live
+> Velociraptor transport is real and tested, but enrolling Windows endpoints
+> needs a lab. The catalog authorizes departments the demo doesn't yet
+> authenticate — the production posture is one env var away, and every record
+> says whether the identity was verified or asserted. And ABSTAIN is a
+> first-class outcome here, not a failure — a defensible 'I cannot conclude'
+> beats a confident wrong answer. That last part is the whole point."
 
-End on the red seal and "reproducible".
+End on the sealed MALICE readout and the word "reproducible".
 
 ---
 
 ## Shot checklist (the required "backend on Google Cloud" proof)
 
-- [ ] `Reset demo` clicked before recording.
+- [ ] `Reset demo` clicked before recording; dark mode on.
 - [ ] The live `*.run.app` URL visible throughout.
-- [ ] `/health`: `vertex_ai: true`, `case_store: firestore`, `autonomous_sweeps`.
+- [ ] `/catalog` as `soc`: the correlator absent from their view.
+- [ ] A cycle as `incident-response`: commander → hunter → correlator →
+      sealed MALICE_HIGH → escalation **resting on** the entry hash.
+- [ ] The same cycle as `soc`: `refused by the catalog` in red.
+- [ ] Mission memory: `CHAIN verified`, already-collected, self-scheduled
+      next cycle; the escalation taken up by a named examiner.
 - [ ] The two-narrator panel: Gemma benign vs Gemini malice, one hash.
-- [ ] The ABSTAIN open question resolving.
+- [ ] `/health`: `vertex_ai: true`, `case_store: firestore`,
+      `llm_in_decision_path: false`, `autonomous_cycles`.
+
+## Fallbacks
+
+- If the Gemini turn is slow or rate-limited on camera, the cycle falls back to
+  the deterministic planner and **says so on screen** — that's honest, not
+  broken; you can even point at the label.
+- If the injection demo's Gemma call fails, the panel says the model is
+  unavailable and that the sealed verdict is unaffected — the seal beat still
+  lands.
+- The `mvp-rev00020` tag remains the one-command fallback to the pre-fleet
+  Taskmaster story if anything is on fire on demo day.

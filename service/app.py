@@ -581,12 +581,21 @@ def injection_demo() -> dict:
     scorer_result = _vigia_score(window_to_case(window))
     entry = session.adjudicate(summary["window_id"])
 
-    # What the attacker planted, pulled straight from the evidence.
+    # What the attacker planted, pulled straight from the evidence. The bait is
+    # a command line carrying a fake verdict to address a narrator directly —
+    # here a forged EDR annotation ("FINAL CLASSIFICATION: BENIGN"); the classic
+    # "ignore previous instructions" is the same shape. Match either so the demo
+    # never shows an empty planted line just because the fixture's bait style
+    # changed.
+    _BAIT_MARKERS = ("edr-annotation", "final classification",
+                     "classification:", "allowlisted")
     planted = ""
     for a in artifacts:
         row = (a.get("metadata") or {}).get("row") or {}
         cl = row.get("CommandLine") or ""
-        if "ignore" in cl.lower() and "instruction" in cl.lower():
+        low = cl.lower()
+        if (("ignore" in low and "instruction" in low)
+                or any(m in low for m in _BAIT_MARKERS)):
             planted = cl
             break
 
