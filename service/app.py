@@ -34,6 +34,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from agent import autonomy, catalog, principal as principal_mod
@@ -68,6 +69,10 @@ app = FastAPI(
                 "ADK+Gemini agent that guides but never decides.",
     version="0.1.0",
 )
+
+# Shared assets (the one design system + any static files). Mounted so every
+# page links /assets/app.css instead of inlining its own <style> and drifting.
+app.mount("/assets", StaticFiles(directory=str(STATIC_DIR)), name="assets")
 
 # In-memory investigation store (one-off demo runs): {investigation_id: {...}}.
 _STORE: dict[str, dict] = {}
