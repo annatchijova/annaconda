@@ -108,6 +108,24 @@ gcloud scheduler jobs create pubsub annaconda-sweeper --location us-central1 \
 gcloud scheduler jobs run annaconda-sweeper --location us-central1 --project <project>
 ```
 
+## Requiring a verified identity
+
+By default a tasking may *assert* its department, and every cycle records that
+it was asserted. To require a verified Google identity token instead:
+
+```bash
+gcloud run services update vigia-live --region us-central1 \
+  --set-env-vars VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL=true,\
+VIGIA_DEPARTMENT_ROSTER="analyst@example.com:soc,ir-lead@example.com:incident-response",\
+VIGIA_EXPECTED_AUDIENCE="$URL"
+```
+
+An asserted principal is then refused with 403. A verified identity wins over
+whatever the request body claims, so a SOC token cannot run as forensics. Give
+the Pub/Sub push subscription an OIDC token (`--push-auth-service-account`) and
+roster that service account, so the cron runs authenticated too. `/health`
+reports `requires_authenticated_principal`.
+
 ## Known considerations
 
 - The service is deployed `--allow-unauthenticated` for the demo. Agent-mode

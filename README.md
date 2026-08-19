@@ -152,9 +152,19 @@ fleet as one department sees it: which agents it may task, over which data
 classes, in which region, each naming the manifest hash the sealed registry
 approved. It is a gate, not a document — run a cycle as the SOC and the
 adjudication request is refused, because adjudication belongs to forensics,
-while the collection the SOC *is* cleared for proceeds. The full compliance
-posture, including what the residency rule does **not** cover, is in
-[docs/COMPLIANCE.md](docs/COMPLIANCE.md).
+while the collection the SOC *is* cleared for proceeds.
+
+A gate is only as good as the identity in front of it, so every tasking
+resolves a principal (`agent/principal.py`): a presented Google identity token
+is verified and mapped to a department, and it wins over whatever the request
+claims — a SOC token cannot run as forensics. With no verified identity the
+department is **asserted**, and that fact is sealed into the case's journal
+beside it, so a record answers "who ran this cycle, and was that verified".
+`VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL=true` refuses asserted principals
+outright; `/health` reports which posture is live.
+
+The full compliance posture, including what the residency rule does **not**
+cover, is in [docs/COMPLIANCE.md](docs/COMPLIANCE.md).
 
 ## How it meets the hackathon requirements
 

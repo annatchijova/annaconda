@@ -154,13 +154,23 @@ but it is not done here and should not be claimed.
   a multi-year deployment does not.
 - **Rate limiting** on the paid endpoints is a coarse per-instance sliding
   window (`VIGIA_RATE_MAX`). It stops a hammer; it is not a quota system.
-- **Authentication.** The demo service is deployed `--allow-unauthenticated`.
-  The catalog gates which *department* may task which agent, but the service
-  does not yet authenticate *who* is claiming to be that department. In a real
-  deployment the department must come from an authenticated identity (Cloud Run
-  IAM plus an identity token), not from a request body. As it stands, the
-  catalog is a working authorisation mechanism with an unauthenticated
-  principal — the gate is real, the identity behind it is asserted.
+- **Authentication.** The catalog gate is only as good as the identity in front
+  of it, so `agent/principal.py` resolves one on every tasking and names its
+  confidence. A presented Google identity token is verified and mapped to a
+  department through the deployment's roster (`VIGIA_DEPARTMENT_ROSTER`); a
+  verified identity wins over whatever the request claims, so a caller cannot
+  present a SOC token and ask to run as forensics. With no verified identity
+  the department is **asserted**, and the principal — department, identity,
+  `authenticated: false`, and how it was resolved — is sealed into the case's
+  mission journal, so a record answers "who ran this cycle, and was that
+  verified" months later.
+
+  The deployed demo runs `--allow-unauthenticated` and therefore asserts. That
+  is a posture, not a gap in the mechanism: set
+  `VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL=true` and an asserted principal is
+  refused with 403. `/health` reports which posture is live. What remains
+  genuinely undone is the identity provider itself — a real deployment puts
+  Cloud Run IAM or an IAP in front and populates the roster.
 - **Gemini's own behaviour is not tested here.** The ADK loop is —
   `tests/test_commander_loop.py` runs it end to end against a scripted
   `BaseLlm` that reads real tool results from the transcript, so tool

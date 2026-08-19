@@ -412,11 +412,24 @@ def stand_down(mission: dict, *, actor: str, rationale: str) -> dict:
     return entry
 
 
-def begin_cycle(mission: dict, *, actor: str, trigger: str) -> int:
-    """Open an autonomous cycle. Returns the new cycle number."""
+def begin_cycle(mission: dict, *, actor: str, trigger: str,
+                principal: Optional[dict] = None) -> int:
+    """Open an autonomous cycle. Returns the new cycle number.
+
+    ``principal`` is who asked and how well we know it (see agent/principal.py).
+    It is sealed into the journal because "which department ran this" is only
+    worth recording alongside "and was that claim verified".
+    """
     mission["cycles"] = mission.get("cycles", 0) + 1
-    record(mission, actor=actor, action="begin_cycle",
-           detail={"cycle": mission["cycles"], "trigger": _text(trigger, "trigger")})
+    detail = {"cycle": mission["cycles"], "trigger": _text(trigger, "trigger")}
+    if isinstance(principal, dict):
+        detail["principal"] = {
+            "department": principal.get("department"),
+            "identity": principal.get("identity"),
+            "authenticated": bool(principal.get("authenticated")),
+            "how": principal.get("how"),
+        }
+    record(mission, actor=actor, action="begin_cycle", detail=detail)
     return mission["cycles"]
 
 

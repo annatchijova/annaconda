@@ -36,7 +36,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from agent import autonomy, catalog
+from agent import autonomy, catalog, principal as principal_mod
 from agent import mission as mem
 from agent.purple_team_agent import model_id
 from agent.tools import PurpleTeamSession
@@ -210,6 +210,9 @@ def health() -> dict:
         "commander_planner": ("gemini" if autonomy.model_reachable()
                               else "deterministic-fallback"),
         "fleet_department": autonomy.COMMANDER_DEPARTMENT,
+        # Whether a tasking must present a verified identity, or may assert its
+        # department. The demo asserts; the record always says which.
+        "requires_authenticated_principal": principal_mod.require_authenticated(),
         "tracing": tracing_mode(),
         "narrators": {
             "investigator": {
@@ -634,12 +637,14 @@ _SWEEP_STATE = {"count": 0, "last_utc": None, "last_swept": 0,
 
 
 async def _run_cycle_on_case(case: dict, *, department: str, trigger: str,
-                             force: bool = False) -> dict:
+                             force: bool = False,
+                             principal: Optional[dict] = None) -> dict:
     """One unattended cycle on one case, persisted."""
     cid = case["case_id"]
     session = _session_for_case(case, case.get("scenario", "benign"))
     result = await autonomy.run_cycle(session, case, department=department,
-                                      trigger=trigger, force=force)
+                                      trigger=trigger, force=force,
+                                      principal=principal)
     if not result["acted"]:
         return result
 
@@ -661,6 +666,10 @@ async def sweep(req: Request) -> dict:
     cycle. The body (a Pub/Sub push envelope) is ignored — the trigger is the
     signal."""
     from datetime import datetime, timezone
+    # A Pub/Sub push subscription can be configured to present an OIDC token;
+    # when it is, the cron runs as a verified identity like any operator. When
+    # it is not, its department is asserted and every cycle says so.
+    principal = _principal_for(req)
     worked, skipped = [], []
     for row in _CASE_STORE.list_cases():
         cid = row["case_id"]
@@ -673,8 +682,8 @@ async def sweep(req: Request) -> dict:
             continue
         try:
             result = await _run_cycle_on_case(
-                case, department=autonomy.COMMANDER_DEPARTMENT,
-                trigger="cloud-scheduler")
+                case, department=principal["department"],
+                trigger="cloud-scheduler", principal=principal)
         except Exception as exc:  # noqa: BLE001
             # One bad case must not stop the sweep for every other case.
             log.exception("autonomous cycle failed on case %s", cid)
@@ -721,8 +730,27 @@ class CycleRequest(BaseModel):
     force: bool = True
 
 
+def _principal_for(request: Request, claimed: Optional[str] = None) -> dict:
+    """Resolve and enforce the principal behind a tasking.
+
+    A verified identity token wins over anything the request claims. With no
+    verified identity the department is *asserted*, which this deployment
+    allows by default and records as asserted — unless
+    VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL is set, in which case it is refused.
+    """
+    resolved = principal_mod.resolve(
+        authorization_header=request.headers.get("authorization"),
+        claimed_department=claimed,
+        default_department=autonomy.COMMANDER_DEPARTMENT)
+    try:
+        return principal_mod.enforce(resolved)
+    except principal_mod.UnauthenticatedPrincipalError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 @app.post("/cases/{case_id}/cycle")
-async def run_case_cycle(case_id: str, req: CycleRequest) -> dict:
+async def run_case_cycle(case_id: str, req: CycleRequest,
+                         request: Request) -> dict:
     """Run one autonomous cycle on demand and return everything it did.
 
     Same code path the Cloud Scheduler sweep runs — this endpoint only supplies
@@ -736,8 +764,10 @@ async def run_case_cycle(case_id: str, req: CycleRequest) -> dict:
         raise HTTPException(status_code=429,
                             detail="rate limited — an agentic cycle calls "
                                    "Gemini; try again in a few seconds")
-    result = await _run_cycle_on_case(case, department=req.department,
-                                      trigger="operator", force=req.force)
+    principal = _principal_for(request, req.department)
+    result = await _run_cycle_on_case(case, department=principal["department"],
+                                      trigger="operator", force=req.force,
+                                      principal=principal)
     updated = _CASE_STORE.get_case(case_id) or case
     return {"cycle": result, "status": updated.get("status"),
             "worst_verdict": updated.get("worst_verdict"),

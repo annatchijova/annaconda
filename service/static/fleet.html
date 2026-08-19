@@ -232,6 +232,11 @@ function renderCycle(body){
   $("cycle-out").innerHTML = `
     <dl class="kv">
       <dt>Cycle</dt><dd class="mono">#${c.cycle}, running as ${esc(c.department)}</dd>
+      <dt>Principal</dt><dd>${c.principal
+        ? (c.principal.authenticated
+            ? `<span class="ok">verified</span> <span class="mono">${esc(c.principal.identity)}</span>`
+            : `<span class="mono">asserted</span> <span class="dt">— ${esc(c.principal.how)}</span>`)
+        : `<span class="empty">not recorded</span>`}</dd>
       <dt>Planner</dt><dd>${planner}</dd>
       <dt>Case status</dt><dd class="mono">${esc(body.status)} · ${body.sealed_verdicts_total} sealed verdict(s) total</dd>
       <dt>Memory chain</dt><dd>${c.memory.memory_ok

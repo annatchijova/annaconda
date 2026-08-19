@@ -381,6 +381,7 @@ def plan_deterministically(session: PurpleTeamSession, case: dict,
 async def run_cycle(session: PurpleTeamSession, case: dict, *,
                     department: str = COMMANDER_DEPARTMENT,
                     trigger: str = "scheduler",
+                    principal: Optional[dict] = None,
                     force: bool = False, model=None) -> dict:
     """Work one case for one cycle, unattended.
 
@@ -394,7 +395,11 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
                 "next_action": mission.get("next_action"),
                 "standing_down": mission.get("standing_down") is not None}
 
-    mem.begin_cycle(mission, actor=COMMANDER_NAME, trigger=trigger)
+    # Who asked for this cycle, and whether we actually know — sealed into the
+    # journal, so a case's record answers "who ran this, and was that verified"
+    # months later.
+    mem.begin_cycle(mission, actor=COMMANDER_NAME, trigger=trigger,
+                    principal=principal)
     events: list = []
     planner = "deterministic-fallback"
     narration = None
@@ -455,6 +460,7 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
         "planner": planner,
         "planner_error": error,
         "department": department,
+        "principal": principal,
         "fleet_log": events,
         "verdicts": verdicts,
         "narration": narration,
