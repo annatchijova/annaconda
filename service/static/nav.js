@@ -14,7 +14,7 @@
     document.documentElement.setAttribute("data-theme", t);
     try { localStorage.setItem("anna-theme", t); } catch (e) {}
     var btn = document.querySelector(".theme");
-    if (btn) btn.textContent = t === "dark" ? "☀" : "☾";
+    if (btn) btn.textContent = t === "dark" ? "◑" : "◐";
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -27,7 +27,7 @@
     // Wire the theme toggle.
     var btn = document.querySelector(".theme");
     if (btn) {
-      btn.textContent = currentTheme() === "dark" ? "☀" : "☾";
+      btn.textContent = currentTheme() === "dark" ? "◑" : "◐";
       btn.addEventListener("click", function () {
         setTheme(currentTheme() === "dark" ? "light" : "dark");
       });

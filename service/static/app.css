@@ -146,7 +146,7 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .nav-links a {
   font-family: var(--mono); font-size: .72rem; letter-spacing: .02em;
   color: var(--ink-soft); text-decoration: none;
-  padding: .42rem .62rem; border-radius: var(--radius-sm);
+  padding: .42rem .62rem; border-radius: var(--radius-sm); white-space: nowrap;
   transition: background .14s, color .14s;
 }
 .nav-links a:hover { background: var(--card-2); color: var(--ink); text-decoration: none; }
@@ -158,6 +158,17 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
   display: inline-grid; place-items: center; transition: border-color .14s, color .14s;
 }
 .nav .theme:hover { border-color: var(--cyan); color: var(--cyan); }
+
+/* mobile nav: brand on its own line, links scroll horizontally beneath */
+@media (max-width: 640px) {
+  .nav-in { flex-wrap: wrap; row-gap: .55rem; }
+  .brand { order: 1; }
+  .nav .row { order: 2; width: 100%; justify-content: flex-start; gap: .5rem; }
+  .nav-links { flex: 1; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav .theme { flex: none; }
+}
 
 /* ---- eyebrow / headings ----------------------------------------------- */
 .eyebrow {
