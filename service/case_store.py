@@ -21,6 +21,8 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+from agent.mission import new_mission
+
 log = logging.getLogger("annaconda.case_store")
 
 # Worst-first ordering for the analyst queue: higher rank = needs attention.
@@ -51,6 +53,26 @@ def _summarize(case: dict) -> dict:
         "runs": case.get("runs", 0),
         "created_utc": case.get("created_utc"),
         "updated_utc": case.get("updated_utc"),
+        # What the fleet is doing with this case, so the queue shows unattended
+        # work in progress rather than just its last human-driven run.
+        "autonomy": _autonomy_summary(case.get("mission")),
+    }
+
+
+def _autonomy_summary(mission) -> dict:
+    """The fleet's state on one case, for the analyst queue."""
+    if not isinstance(mission, dict):
+        return {"cycles": 0, "next_due_utc": None, "escalated": False,
+                "standing_down": False, "open_questions": 0}
+    plan = mission.get("next_action") or {}
+    return {
+        "cycles": mission.get("cycles", 0),
+        "next_due_utc": plan.get("due_utc"),
+        "next_action": plan.get("action"),
+        "escalated": mission.get("escalation") is not None,
+        "standing_down": mission.get("standing_down") is not None,
+        "open_questions": sum(1 for q in mission.get("open_questions", [])
+                              if not q.get("resolved")),
     }
 
 
@@ -144,13 +166,17 @@ class MemoryCaseStore:
         self._cases: dict[str, dict] = {}
 
     def create_case(self, case_id: str, host: dict, examiner_id: str,
-                    demo: bool = False) -> dict:
+                    demo: bool = False, scenario: str = "benign") -> dict:
         case = {
             "case_id": case_id, "host": host, "examiner_id": examiner_id,
             "created_utc": _now(), "updated_utc": _now(),
             "status": "open", "worst_verdict": None,
             "entries": [], "verdicts": [], "audit_trail": [], "runs": 0,
             "open_question": None, "demo": demo,
+            # Which bundled telemetry this host reports, so an unattended cycle
+            # replays the same host it replayed last time.
+            "scenario": scenario,
+            "mission": new_mission(case_id),
         }
         self._cases[case_id] = case
         return case
@@ -172,6 +198,9 @@ class MemoryCaseStore:
         _apply_run(case, entries, verdicts, audit)
         return case
 
+    def save_mission(self, case_id: str, mission: dict) -> None:
+        self._cases[case_id]["mission"] = mission
+
 
 class FirestoreCaseStore:
     backend = "firestore"
@@ -185,13 +214,17 @@ class FirestoreCaseStore:
         next(iter(self._col.limit(1).stream()), None)
 
     def create_case(self, case_id: str, host: dict, examiner_id: str,
-                    demo: bool = False) -> dict:
+                    demo: bool = False, scenario: str = "benign") -> dict:
         case = {
             "case_id": case_id, "host": host, "examiner_id": examiner_id,
             "created_utc": _now(), "updated_utc": _now(),
             "status": "open", "worst_verdict": None,
             "entries": [], "verdicts": [], "audit_trail": [], "runs": 0,
             "open_question": None, "demo": demo,
+            # Which bundled telemetry this host reports, so an unattended cycle
+            # replays the same host it replayed last time.
+            "scenario": scenario,
+            "mission": new_mission(case_id),
         }
         self._col.document(case_id).set(case)
         return case
@@ -216,6 +249,13 @@ class FirestoreCaseStore:
         _apply_run(case, entries, verdicts, audit)
         self._col.document(case_id).set(case)
         return case
+
+    def save_mission(self, case_id: str, mission: dict) -> None:
+        """Persist the fleet's working memory on its own, so an autonomous
+        cycle's reasoning survives even when it appended no sealed verdict.
+        Written after apply_run: that call re-reads the stored document, so
+        writing the mission first would be overwritten by it."""
+        self._col.document(case_id).update({"mission": mission})
 
 
 def build_case_store():

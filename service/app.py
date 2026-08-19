@@ -6,6 +6,11 @@ Endpoints:
   POST /investigate                run an investigation, return sealed stream
   GET  /investigations/{id}        fetch a stored investigation
   GET  /investigations/{id}/stream the sealed verdict entries (dashboard reads this)
+  GET  /registry                   the sealed agent registry (approved manifests)
+  GET  /catalog                    the enterprise catalog: who may task what
+  POST /tasks/sweep                wake the fleet (Cloud Scheduler -> Pub/Sub)
+  POST /cases/{id}/cycle           run one autonomous cycle on demand
+  GET  /cases/{id}/mission         the case's working memory, chain-verified
 
 Investigation modes (POST /investigate body: {"mode": ...}):
   scripted : run the given hunt groups through the sealed loop, no LLM
@@ -19,6 +24,7 @@ not touch the seal, only where the seal is stored.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 import uuid
@@ -30,6 +36,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from agent import autonomy, catalog
+from agent import mission as mem
 from agent.purple_team_agent import model_id
 from agent.tools import PurpleTeamSession
 from core.verdict_stream import GENESIS_HASH, verify_stream
@@ -37,6 +45,8 @@ from ml.nominator import SurprisalNominator, events_from_artifacts
 from service.case_store import build_case_store
 from tools.velociraptor.adapter import MockTransport, window_to_case
 from tools.velociraptor.vql_templates import TEMPLATES
+
+log = logging.getLogger("annaconda.service")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -185,6 +195,15 @@ def health() -> dict:
         "case_store": _CASE_STORE.backend,
         "autonomous_sweeps": _SWEEP_STATE["count"],
         "last_sweep_utc": _SWEEP_STATE["last_utc"],
+        # The fleet's unattended work: cycles are agent-driven, sweeps are only
+        # the wake-ups. Most wake-ups should skip most cases.
+        "autonomous_cycles": _SWEEP_STATE["cycles_total"],
+        "cases_worked_last_sweep": _SWEEP_STATE["last_swept"],
+        "cases_not_due_last_sweep": _SWEEP_STATE["last_skipped"],
+        "escalations_raised": _SWEEP_STATE["escalations_total"],
+        "commander_planner": ("gemini" if autonomy.model_reachable()
+                              else "deterministic-fallback"),
+        "fleet_department": autonomy.COMMANDER_DEPARTMENT,
         "tracing": tracing_mode(),
         "narrators": {
             "investigator": {
@@ -204,6 +223,30 @@ def registry() -> dict:
     manifest is not here."""
     from agent.registry import REGISTRY_VERSION, approved_registry
     return {"registry_version": REGISTRY_VERSION, "agents": approved_registry()}
+
+
+@app.get("/catalog")
+def agent_catalog(department: Optional[str] = None) -> dict:
+    """The enterprise catalog: which department may task which agent, over what
+    data, in what region. Pass ?department=soc to see the fleet as one
+    department sees it — the SOC may task the collectors, but adjudication
+    belongs to forensics.
+
+    Each entry names the manifest hash the sealed registry approved, so a
+    published agent is always a specific, approved tool contract.
+    """
+    try:
+        entries = catalog.catalog(department)
+    except catalog.NotPublishedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "department": department,
+        "home_region": catalog.HOME_REGION,
+        "data_classes": sorted(catalog.DATA_CLASSES),
+        "departments": sorted(catalog.DEPARTMENTS),
+        "agents": entries,
+        "registry_agreement": catalog.catalog_matches_registry() or "ok",
+    }
 
 
 @app.get("/hunts")
@@ -305,6 +348,10 @@ class CaseCreateRequest(BaseModel):
     hostname: str = Field("WIN11-VICTIM", min_length=1, max_length=256)
     client_id: str = Field("C.demo01", min_length=1, max_length=256)
     examiner_id: str = Field(..., min_length=1, max_length=128)
+    # Which bundled telemetry this host reports. The autonomous fleet replays
+    # it on every unattended cycle, so it is a property of the case, not of one
+    # request (a compromised host stays compromised between cycles).
+    scenario: str = Field("benign", pattern=r"^(benign|attack|insufficient)$")
 
 
 class CaseInvestigateRequest(BaseModel):
@@ -339,7 +386,8 @@ def create_case(req: CaseCreateRequest) -> dict:
     if _CASE_STORE.get_case(req.case_id) is not None:
         raise HTTPException(status_code=409, detail=f"case {req.case_id} already exists")
     host = {"client_id": req.client_id, "hostname": req.hostname, "os": "windows"}
-    case = _CASE_STORE.create_case(req.case_id, host, req.examiner_id)
+    case = _CASE_STORE.create_case(req.case_id, host, req.examiner_id,
+                                   scenario=req.scenario)
     return {"case": case, "persistence": _CASE_STORE.backend}
 
 
@@ -563,42 +611,153 @@ def injection_demo() -> dict:
     }
 
 
-# --- autonomous sweeps: runs without a human (Cloud Scheduler -> Pub/Sub) -----
+# --- autonomous operation: the fleet works cases with nobody watching --------
+#
+# This used to be a script: a cron that ran one hard-coded collection on every
+# open case, forever. It is now a fleet of agents working cases on their own
+# schedule — the commander reads what earlier cycles established, tasks the
+# specialists it is cleared to task, and decides when to look again, when a
+# human is needed, and when to stop. What it still cannot do is decide what the
+# evidence means: the verdict comes back sealed from the deterministic engine.
+#
+# Most ticks should do almost nothing. A case is worked only when the fleet's
+# own schedule says it is due, so a quiet host is not re-collected every hour.
 
-_SWEEP_STATE = {"count": 0, "last_utc": None, "last_swept": 0}
+_SWEEP_STATE = {"count": 0, "last_utc": None, "last_swept": 0,
+                "last_skipped": 0, "cycles_total": 0, "escalations_total": 0}
+
+
+async def _run_cycle_on_case(case: dict, *, department: str, trigger: str,
+                             force: bool = False) -> dict:
+    """One unattended cycle on one case, persisted."""
+    cid = case["case_id"]
+    session = _session_for_case(case, case.get("scenario", "benign"))
+    result = await autonomy.run_cycle(session, case, department=department,
+                                      trigger=trigger, force=force)
+    if not result["acted"]:
+        return result
+
+    if result["verdicts"]:
+        _CASE_STORE.apply_run(cid, list(session._entries), result["verdicts"],
+                              session.audit_trail)
+    # Written after apply_run: on Firestore that call re-reads the stored
+    # document, so the mission has to be persisted last or it is overwritten.
+    # And it is persisted even when the cycle sealed nothing — a cycle that
+    # only reasoned still changed what the next one knows.
+    _CASE_STORE.save_mission(cid, case["mission"])
+    return result
 
 
 @app.post("/tasks/sweep")
 async def sweep(req: Request) -> dict:
-    """Continue hunts on open cases with no human in the loop. Cloud Scheduler
-    publishes to Pub/Sub on a cron; a push subscription delivers here; each
-    open case gets one more sealed window appended to its chain. The body (a
-    Pub/Sub push envelope) is ignored — the trigger is the signal."""
+    """Wake the fleet. Cloud Scheduler publishes to Pub/Sub on a cron; a push
+    subscription delivers here; each case that is *due* gets one autonomous
+    cycle. The body (a Pub/Sub push envelope) is ignored — the trigger is the
+    signal."""
     from datetime import datetime, timezone
-    swept = []
+    worked, skipped = [], []
     for row in _CASE_STORE.list_cases():
-        # A resolved-malicious case does not need re-hunting; keep watching the rest.
-        if row.get("status") == "malice":
-            continue
         cid = row["case_id"]
         case = _CASE_STORE.get_case(cid)
         if case is None:
             continue
         # Demo/showcase cases are left untouched so a judge always sees a clean,
-        # predictable state (they reset and drive those themselves).
+        # predictable state (they drive those from /console themselves).
         if case.get("demo"):
             continue
-        session = _session_for_case(case, "benign")
-        result = _run_scripted(session, [["pslist", "netstat"]])
-        updated = _CASE_STORE.apply_run(
-            cid, list(session._entries), result["verdicts"], session.audit_trail)
-        swept.append({"case_id": cid, "worst_verdict": updated["worst_verdict"],
-                      "sealed_verdicts": len(updated["entries"])})
+        try:
+            result = await _run_cycle_on_case(
+                case, department=autonomy.COMMANDER_DEPARTMENT,
+                trigger="cloud-scheduler")
+        except Exception as exc:  # noqa: BLE001
+            # One bad case must not stop the sweep for every other case.
+            log.exception("autonomous cycle failed on case %s", cid)
+            skipped.append({"case_id": cid, "reason": f"cycle failed: {exc}"})
+            continue
+
+        if not result["acted"]:
+            skipped.append({"case_id": cid, "reason": result["reason"],
+                            "next_due_utc": (result.get("next_action") or {}).get("due_utc"),
+                            "standing_down": result.get("standing_down")})
+            continue
+
+        _SWEEP_STATE["cycles_total"] += 1
+        if result.get("escalation"):
+            _SWEEP_STATE["escalations_total"] += 1
+        worked.append({
+            "case_id": cid,
+            "cycle": result["cycle"],
+            "planner": result["planner"],
+            "verdicts": [v["verdict_state"] for v in result["verdicts"]],
+            "escalated": result.get("escalation") is not None,
+            "next_due_utc": (result.get("next_action") or {}).get("due_utc"),
+            "standing_down": result.get("standing_down") is not None,
+            "memory_ok": result["memory"]["memory_ok"],
+        })
+
     _SWEEP_STATE["count"] += 1
     _SWEEP_STATE["last_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    _SWEEP_STATE["last_swept"] = len(swept)
-    return {"swept": len(swept), "cases": swept,
-            "autonomous_sweeps_total": _SWEEP_STATE["count"]}
+    _SWEEP_STATE["last_swept"] = len(worked)
+    _SWEEP_STATE["last_skipped"] = len(skipped)
+    return {"worked": len(worked), "cases": worked,
+            "skipped": len(skipped), "not_due": skipped,
+            "autonomous_sweeps_total": _SWEEP_STATE["count"],
+            "autonomous_cycles_total": _SWEEP_STATE["cycles_total"]}
+
+
+class CycleRequest(BaseModel):
+    # The department the fleet runs as. The catalog decides what that department
+    # may task: run this as "soc" and the adjudication request is refused.
+    department: str = Field(autonomy.COMMANDER_DEPARTMENT, min_length=1,
+                            max_length=64)
+    # Work the case now even if the fleet scheduled itself for later. This is
+    # for a human asking to see a cycle; the cron never forces.
+    force: bool = True
+
+
+@app.post("/cases/{case_id}/cycle")
+async def run_case_cycle(case_id: str, req: CycleRequest) -> dict:
+    """Run one autonomous cycle on demand and return everything it did.
+
+    Same code path the Cloud Scheduler sweep runs — this endpoint only supplies
+    the wake-up, so what you watch here is what happens at 3am with nobody
+    looking.
+    """
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    if not _rate_ok("cycle"):
+        raise HTTPException(status_code=429,
+                            detail="rate limited — an agentic cycle calls "
+                                   "Gemini; try again in a few seconds")
+    result = await _run_cycle_on_case(case, department=req.department,
+                                      trigger="operator", force=req.force)
+    updated = _CASE_STORE.get_case(case_id) or case
+    return {"cycle": result, "status": updated.get("status"),
+            "worst_verdict": updated.get("worst_verdict"),
+            "sealed_verdicts_total": len(updated.get("entries", [])),
+            "persistence": _CASE_STORE.backend}
+
+
+@app.get("/cases/{case_id}/mission")
+def case_mission(case_id: str) -> dict:
+    """The case's working memory: what the fleet established, tried, and
+    planned across every cycle — with its hash chain re-verified, so a memory
+    that was edited between cycles says so."""
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    mission = mem.attach(case)
+    return {"case_id": case_id,
+            "brief": mem.brief(mission, case=case),
+            "hypotheses": mission.get("hypotheses", []),
+            "open_questions": mission.get("open_questions", []),
+            "tried_hunts": mission.get("tried_hunts", []),
+            "next_action": mission.get("next_action"),
+            "escalation": mission.get("escalation"),
+            "standing_down": mission.get("standing_down"),
+            "journal": mission.get("journal", []),
+            "verification": mem.verify_mission(mission)}
 
 
 @app.post("/demo/seed")
@@ -616,8 +775,10 @@ def demo_seed() -> dict:
     }
     for cid, (scenario, groups) in plan.items():
         _CASE_STORE.delete_case(cid)
+        # The scenario is stored on the case so an on-demand autonomous cycle
+        # replays this host's telemetry, not the benign default.
         case = _CASE_STORE.create_case(cid, dict(host, hostname=cid.split("-")[1]),
-                                       "perito-01", demo=True)
+                                       "perito-01", demo=True, scenario=scenario)
         session = _session_for_case(case, scenario)
         result = _run_scripted(session, groups)
         _CASE_STORE.apply_run(cid, list(session._entries),
