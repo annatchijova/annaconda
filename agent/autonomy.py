@@ -36,6 +36,7 @@ import os
 from typing import Optional
 
 from agent import catalog, mission as mem
+from agent._tracing import annotate, span
 from agent.fleet import (
     correlator_tools, dispatcher_tools, persistence_tools, windows_hunter_tools,
 )
@@ -150,17 +151,25 @@ def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
         if spec is None:
             return {"error": f"unknown specialist {specialist!r}; "
                              f"available: {sorted(_HUNTERS)}"}
-        try:
-            catalog.authorize(specialist, department=department,
-                              data_classes=spec["data_classes"])
-        except PermissionError as exc:
-            _note(specialist, "refused_by_catalog", detail=str(exc))
-            return {"error": f"catalog refused this tasking: {exc}"}
+        with span(f"{specialist}.collect", **{"fleet.role": specialist,
+                                              "fleet.department": department,
+                                              "fleet.reason": reason}) as sp:
+            try:
+                catalog.authorize(specialist, department=department,
+                                  data_classes=spec["data_classes"])
+            except PermissionError as exc:
+                annotate(sp, **{"catalog.refused": True,
+                                "catalog.reason": str(exc)})
+                _note(specialist, "refused_by_catalog", detail=str(exc))
+                return {"error": f"catalog refused this tasking: {exc}"}
 
-        summary = spec["tools"](session)[0](reason)
-        if "error" in summary:
-            _note(specialist, "collect_failed", detail=summary["error"])
-            return summary
+            summary = spec["tools"](session)[0](reason)
+            if "error" in summary:
+                annotate(sp, **{"collect.failed": True})
+                _note(specialist, "collect_failed", detail=summary["error"])
+                return summary
+            annotate(sp, **{"window.id": summary["window_id"],
+                            "window.artifacts": summary.get("artifacts")})
         mem.record_collection(mission, actor=specialist, hunts=spec["hunts"],
                               reason=reason, window_id=summary["window_id"])
         _note(specialist, "collect", window_id=summary["window_id"],
@@ -171,17 +180,28 @@ def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
         """Ask the correlator to adjudicate a frozen window into a SEALED
         verdict from the deterministic engine. The result is final: report the
         verdict state, score and MITRE techniques exactly as returned."""
-        try:
-            catalog.authorize("correlator", department=department,
-                              data_classes=["sealed_verdicts"])
-        except PermissionError as exc:
-            _note("correlator", "refused_by_catalog", detail=str(exc))
-            return {"error": f"catalog refused this tasking: {exc}"}
+        with span("correlator.adjudicate", **{"fleet.role": "correlator",
+                                              "fleet.department": department,
+                                              "window.id": window_id}) as sp:
+            try:
+                catalog.authorize("correlator", department=department,
+                                  data_classes=["sealed_verdicts"])
+            except PermissionError as exc:
+                annotate(sp, **{"catalog.refused": True,
+                                "catalog.reason": str(exc)})
+                _note("correlator", "refused_by_catalog", detail=str(exc))
+                return {"error": f"catalog refused this tasking: {exc}"}
 
-        verdict = correlator_tools(session)[0](window_id)
-        if "error" in verdict:
-            _note("correlator", "adjudicate_failed", detail=verdict["error"])
-            return verdict
+            verdict = correlator_tools(session)[0](window_id)
+            if "error" in verdict:
+                annotate(sp, **{"adjudicate.failed": True})
+                _note("correlator", "adjudicate_failed", detail=verdict["error"])
+                return verdict
+            annotate(sp, **{"verdict.state": verdict["verdict_state"],
+                            "verdict.sealed": True,
+                            "verdict.entry_hash": verdict.get("entry_hash"),
+                            "verdict.mitre": ",".join(
+                                verdict.get("mitre_techniques", []))})
         _note("correlator", "adjudicate", window_id=window_id,
               verdict_state=verdict["verdict_state"],
               mitre_techniques=verdict.get("mitre_techniques", []))
@@ -229,15 +249,20 @@ def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
     def escalate_to_human(why: str, what_to_check: str) -> dict:
         """Hand this case to a human examiner, with the reasoning that made it
         necessary and what they should look at first."""
-        try:
-            esc = mem.escalate(mission, actor=COMMANDER_NAME, why=why,
-                               what_to_check=what_to_check,
-                               # Read from the adjudicated record, not from the
-                               # caller: the agent has no way to state, inflate
-                               # or hide what was actually sealed.
-                               sealed_basis=sealed_verdicts(session))
-        except mem.MissionError as exc:
-            return {"error": str(exc)}
+        with span("commander.escalate", **{"fleet.role": COMMANDER_NAME}) as sp:
+            try:
+                esc = mem.escalate(mission, actor=COMMANDER_NAME, why=why,
+                                   what_to_check=what_to_check,
+                                   # Read from the adjudicated record, not from
+                                   # the caller: the agent has no way to state,
+                                   # inflate or hide what was actually sealed.
+                                   sealed_basis=sealed_verdicts(session))
+            except mem.MissionError as exc:
+                return {"error": str(exc)}
+            annotate(sp, **{
+                "escalation.unsupported_by_seal": esc["unsupported_by_seal"],
+                "escalation.unsealed_claims": ",".join(
+                    esc["unsealed_verdict_claims"])})
         _note(COMMANDER_NAME, "escalate_to_human", why=esc["why"],
               what_to_check=esc["what_to_check"],
               unsupported_by_seal=esc["unsupported_by_seal"],
@@ -405,43 +430,61 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
     narration = None
     error = None
 
-    # An explicitly supplied model is used whatever the environment says: the
-    # credential check exists for the cron on a machine that may have none, and
-    # a caller that handed us a model has already answered that question.
-    if model is not None or model_reachable():
-        try:
-            narration = await _run_commander_turn(
-                session, case, mission, department=department,
-                log_sink=events, model=model)
-            planner = "gemini"
-        except Exception as exc:  # noqa: BLE001
-            # An unattended cycle must not die because the model was
-            # unreachable, rate limited, or refused. Fall back, and record that
-            # it fell back — silence here would look like agent reasoning.
-            log.warning("commander turn failed on case %s (%s) — falling back "
-                        "to the deterministic planner", case.get("case_id"), exc)
-            error = str(exc)
-            events.append({"role": COMMANDER_NAME, "action": "agent_turn_failed",
-                           "detail": str(exc)})
+    cycle_span = span("fleet.cycle", **{
+        "case.id": case["case_id"],
+        "cycle.number": mission["cycles"],
+        "cycle.trigger": trigger,
+        "fleet.department": department,
+        "principal.authenticated": bool((principal or {}).get("authenticated")),
+    })
+    with cycle_span as root:
+        # An explicitly supplied model is used whatever the environment says:
+        # the credential check exists for the cron on a machine that may have
+        # none, and a caller that handed us a model has already answered that.
+        if model is not None or model_reachable():
+            try:
+                narration = await _run_commander_turn(
+                    session, case, mission, department=department,
+                    log_sink=events, model=model)
+                planner = "gemini"
+            except Exception as exc:  # noqa: BLE001
+                # An unattended cycle must not die because the model was
+                # unreachable, rate limited, or refused. Fall back, and record
+                # that it fell back — silence would look like agent reasoning.
+                log.warning("commander turn failed on case %s (%s) — falling "
+                            "back to the deterministic planner",
+                            case.get("case_id"), exc)
+                error = str(exc)
+                events.append({"role": COMMANDER_NAME,
+                               "action": "agent_turn_failed",
+                               "detail": str(exc)})
 
-    if planner != "gemini":
-        plan_deterministically(session, case, mission, department=department,
-                               log_sink=events)
+        if planner != "gemini":
+            plan_deterministically(session, case, mission,
+                                   department=department, log_sink=events)
 
-    # A cycle that ended with no decision about the case's future would strand
-    # it: the sweep would revisit it every tick forever. Close that hole here
-    # rather than trusting the planner to have done it.
-    if (mission.get("next_action") is None
-            and not mission.get("standing_down")):
-        mem.schedule_next_action(
-            mission, actor=COMMANDER_NAME,
-            action="re-assess this case",
-            in_hours=24,
-            why="the cycle ended without setting its own next step; a default "
-                "interval is applied so the case is neither stranded nor "
-                "revisited every tick")
-        events.append({"role": COMMANDER_NAME, "action": "default_schedule_applied",
-                       "detail": "the cycle set no next step; applied 24h"})
+        # A cycle that ended with no decision about the case's future would
+        # strand it: the sweep would revisit it every tick forever. Close that
+        # hole here rather than trusting the planner to have done it.
+        if (mission.get("next_action") is None
+                and not mission.get("standing_down")):
+            mem.schedule_next_action(
+                mission, actor=COMMANDER_NAME,
+                action="re-assess this case",
+                in_hours=24,
+                why="the cycle ended without setting its own next step; a "
+                    "default interval is applied so the case is neither "
+                    "stranded nor revisited every tick")
+            events.append({"role": COMMANDER_NAME,
+                           "action": "default_schedule_applied",
+                           "detail": "the cycle set no next step; applied 24h"})
+
+        annotate(root, **{
+            "cycle.planner": planner,
+            "cycle.sealed_verdicts": len(sealed_verdicts(session)),
+            "cycle.escalated": mission.get("escalation") is not None,
+            "cycle.standing_down": mission.get("standing_down") is not None,
+        })
 
     verdicts = sealed_verdicts(session)
     # The narration is the agent's own words about a cycle it just ran. It is

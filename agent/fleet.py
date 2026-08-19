@@ -21,34 +21,10 @@ The single-investigator route is untouched; the fleet is additive.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-
 from agent.purple_team_agent import model_id
 from agent.tools import PurpleTeamSession
 
-try:
-    from opentelemetry import trace as _otel
-    _TRACER = _otel.get_tracer("annaconda.fleet")
-except Exception:  # noqa: BLE001 — tracing is optional
-    _TRACER = None
-
-
-@contextmanager
-def _span(name: str, **attrs):
-    """A reasoning-chain span. No-op unless a tracer provider is configured, so
-    it is safe in tests and local runs."""
-    if _TRACER is None:
-        yield None
-        return
-    with _TRACER.start_as_current_span(name) as sp:
-        for k, v in attrs.items():
-            if v is not None:
-                try:
-                    sp.set_attribute(k, v if isinstance(v, (str, int, float, bool))
-                                     else str(v))
-                except Exception:  # noqa: BLE001
-                    pass
-        yield sp
+from agent._tracing import span as _span
 
 
 # --- disjoint tool contracts -------------------------------------------------

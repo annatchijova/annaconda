@@ -270,8 +270,12 @@ disjoint tool contracts (verified by a test, shown on `/exhibit` under **Run
 the fleet**), and a **sealed agent registry** — every agent published with a
 version and the hash of its tool manifest (same encoder that seals verdicts);
 the runtime refuses to load an agent whose manifest is not approved
-(`GET /registry`; `agent/registry.py`), **OpenTelemetry → Cloud Trace** for
-end-to-end agent-reasoning tracing, and the **autonomous fleet** — an agentic
+(`GET /registry`; `agent/registry.py`), **OpenTelemetry → Cloud Trace** tracing
+of the reasoning chain — a `fleet.cycle` span per unattended cycle, with a child
+span per specialist tasked, carrying the sealed verdict state, the entry hash,
+and any catalog refusal, so Cloud Trace shows the shape of an investigation
+nobody watched happen (`tests/test_tracing.py` reads the spans back to prove
+it) — and the **autonomous fleet** — an agentic
 cycle that works cases unattended, with tamper-evident mission memory, a
 per-case schedule it sets itself, and an enterprise catalog that gates every
 delegation by department, data class and region. Next:
