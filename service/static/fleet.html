@@ -4,150 +4,111 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>annaconda — Autonomous Fleet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/app.css">
 <style>
-  :root{
-    --paper:#eef0f1;--paper-deep:#e4e7e8;--card:#f7f8f8;
-    --ink:#191d21;--ink-soft:#5a646c;--ink-faint:#8b949a;
-    --hairline:#c9d0d2;--hairline-2:#dbe0e1;
-    --legal:#23425e;--seal:#9e2b1e;--seal-deep:#7e2016;--sealed:#2e664b;--amber:#8a6410;--purple:#6d3a86;
-    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
-  }
-  *{box-sizing:border-box;}
-  body{margin:0;background:radial-gradient(130% 90% at 50% -8%,#f5f6f7 0%,var(--paper) 40%,var(--paper-deep) 100%);
-    color:var(--ink);font-family:var(--serif);line-height:1.55;-webkit-font-smoothing:antialiased;
-    padding:clamp(1rem,4vw,2.5rem) 1rem 3rem;}
-  .wrap{max-width:1080px;margin:0 auto;}
-  nav.top{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;}
-  nav.top .brand{font-family:var(--sans);font-weight:700;letter-spacing:.12em;font-size:.9rem;}
-  nav.top .brand span{color:var(--legal);}
-  nav.top a{font-family:var(--sans);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--legal);
-    text-decoration:none;border:1px solid var(--hairline);border-radius:4px;padding:.5rem .9rem;background:#fff;margin-left:.4rem;}
-  nav.top a:hover{background:#eef1f4;}
+  .page { max-width: var(--maxw); margin: 0 auto; padding: clamp(1.4rem,4vw,2.4rem) clamp(1rem,4vw,2rem) 3rem; }
+  .panel { margin-bottom: 1.3rem; }
+  .controls { display: flex; gap: .7rem; flex-wrap: wrap; align-items: flex-end;
+    padding: 1rem 1.1rem; border-bottom: 1px solid var(--line); }
+  .region { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); align-self: center; }
 
-  h1{font-size:clamp(1.6rem,4vw,2.2rem);font-weight:600;letter-spacing:-.012em;margin:0 0 .3rem;}
-  .lede{color:var(--ink-soft);margin:0 0 1.6rem;max-width:66ch;}
-  .lede b{color:var(--ink);font-weight:600;}
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  th { font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-faint); text-align: left; padding: .6rem .7rem; border-bottom: 1px solid var(--line); }
+  td { padding: .6rem .7rem; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.name { font-family: var(--mono); font-size: .78rem; color: var(--ink); white-space: nowrap; }
+  td.hash { font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); }
 
-  .panel{background:var(--card);border:1px solid var(--hairline);border-radius:6px;overflow:hidden;margin-bottom:1.4rem;}
-  .panel > h2{font-family:var(--sans);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-soft);
-    margin:0;padding:.9rem 1.1rem;border-bottom:1px solid var(--hairline);background:linear-gradient(var(--card),#eef1f1);
-    display:flex;justify-content:space-between;align-items:center;gap:1rem;}
-  .panel > h2 .note{letter-spacing:0;text-transform:none;font-family:var(--serif);font-size:.8rem;color:var(--ink-faint);font-style:italic;}
-  .body{padding:1rem 1.1rem;}
+  /* fleet-log rows */
+  .step { display: grid; grid-template-columns: 9.5rem 1fr; gap: .8rem; align-items: start;
+    padding: .55rem .2rem; border-bottom: 1px solid var(--line-2); }
+  .step:last-child { border-bottom: 0; }
+  .role { font-family: var(--mono); font-size: .6rem; letter-spacing: .08em; text-transform: uppercase;
+    color: #fff; background: var(--ink-soft); border-radius: 3px; padding: .24rem .4rem; height: fit-content; text-align: center; }
+  .role.hunter { background: var(--ink-soft); }
+  .role.correlator { background: var(--benign); }
+  .role.commander { background: var(--cyan); }
+  .role.refused { background: var(--malice); }
+  .what { font-size: .86rem; color: var(--ink); }
+  .what .act { font-family: var(--mono); font-size: .74rem; color: var(--cyan-deep); }
+  .what .dt { color: var(--ink-soft); font-size: .82rem; }
+  .verdict { font-family: var(--mono); font-weight: 600; color: var(--malice); }
+  .verdict.benign { color: var(--benign); } .verdict.abstain { color: var(--abstain); }
+  .flag { display: inline-block; font-family: var(--mono); font-size: .62rem; letter-spacing: .02em;
+    color: var(--malice-deep); background: var(--malice-wash); border: 1px solid var(--malice);
+    border-radius: 3px; padding: .1rem .4rem; margin-left: .3rem; }
 
-  .controls{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end;padding:1rem 1.1rem;border-bottom:1px solid var(--hairline);}
-  .f{display:flex;flex-direction:column;gap:.25rem;}
-  label{font-family:var(--sans);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);}
-  select,input{font-family:var(--mono);font-size:.8rem;padding:.45rem .55rem;border:1px solid var(--hairline);border-radius:3px;background:#fff;}
-  button{appearance:none;cursor:pointer;font-family:var(--sans);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;
-    border:0;border-radius:4px;padding:.55rem 1rem;transition:background .16s,opacity .16s;}
-  button.primary{background:var(--legal);color:#fff;} button.primary:hover{background:#16324a;}
-  button.ghost{background:#fff;color:var(--legal);border:1px solid var(--hairline);} button.ghost:hover{background:#eef1f4;}
-  button[disabled]{opacity:.5;cursor:default;}
+  .ok { color: var(--benign); font-weight: 600; }
+  .bad { color: var(--malice); font-weight: 600; }
+  .dt { color: var(--ink-soft); }
 
-  table{width:100%;border-collapse:collapse;font-size:.82rem;}
-  th{font-family:var(--sans);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);
-    text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--hairline);}
-  td{padding:.55rem .6rem;border-bottom:1px solid var(--hairline-2);vertical-align:top;}
-  tr:last-child td{border-bottom:0;}
-  td.name{font-family:var(--mono);font-size:.78rem;color:var(--ink);white-space:nowrap;}
-  td.hash{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);}
-  .tag{display:inline-block;font-family:var(--mono);font-size:.66rem;background:#fff;border:1px solid var(--hairline);
-    border-radius:3px;padding:.12rem .38rem;margin:.1rem .18rem .1rem 0;color:var(--ink-soft);}
-  .tag.core{border-color:var(--seal);color:var(--seal);}
-  .tag.mem{border-color:var(--purple);color:var(--purple);}
+  .escal { border-left: 3px solid var(--line); padding: .5rem 0 .55rem .8rem; margin: .45rem 0; }
+  .escal.current { border-left-color: var(--malice); }
+  .escal.done { opacity: .62; border-left-color: var(--benign); }
+  .escal button.ack { margin-top: .4rem; padding: .38rem .7rem; font-size: .62rem; }
 
-  .step{display:grid;grid-template-columns:9.5rem 1fr;gap:.8rem;padding:.6rem .3rem;border-bottom:1px solid var(--hairline-2);}
-  .step:last-child{border-bottom:0;}
-  .role{font-family:var(--sans);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:#fff;
-    background:var(--legal);border-radius:3px;padding:.2rem .4rem;height:fit-content;text-align:center;}
-  .role.hunter{background:#3d6b8a;} .role.correlator{background:var(--sealed);}
-  .role.commander{background:var(--purple);} .role.refused{background:var(--seal);}
-  .flag{display:inline-block;font-family:var(--sans);font-size:.62rem;letter-spacing:.04em;
-    color:var(--seal-deep);background:#fdf0ee;border:1px solid var(--seal);border-radius:3px;
-    padding:.1rem .38rem;margin-left:.3rem;}
-  .what{font-size:.85rem;}
-  .what .act{font-family:var(--mono);font-size:.74rem;color:var(--legal);}
-  .what .dt{color:var(--ink-soft);font-size:.8rem;}
-  .verdict{font-family:var(--mono);font-weight:700;color:var(--seal);}
-  .verdict.benign{color:var(--sealed);} .verdict.abstain{color:var(--amber);}
-
-  .kv{display:grid;grid-template-columns:11rem 1fr;gap:.35rem .9rem;font-size:.85rem;}
-  .kv dt{font-family:var(--sans);font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);padding-top:.25rem;}
-  .kv dd{margin:0;}
-  .mono{font-family:var(--mono);font-size:.76rem;}
-  .ok{color:var(--sealed);font-weight:700;} .bad{color:var(--seal);font-weight:700;}
-  .empty{color:var(--ink-faint);font-style:italic;}
-  .escal{border-left:3px solid var(--hairline);padding:.4rem 0 .5rem .7rem;margin:.35rem 0;}
-  .escal.current{border-left-color:var(--seal);}
-  .escal.done{opacity:.62;border-left-color:var(--sealed);}
-  .escal button.ack{margin-top:.35rem;padding:.35rem .7rem;font-size:.6rem;}
-  .err{background:#fdf0ee;border:1px solid var(--seal);color:var(--seal-deep);border-radius:4px;padding:.7rem .9rem;font-size:.85rem;margin:.8rem 0 0;}
+  .err { margin-top: .8rem; }
+  .kv { grid-template-columns: 11rem 1fr; }
 </style>
 </head>
-<body>
-<div class="wrap">
-  <nav class="top">
-    <div class="brand">annaconda<span>.</span></div>
-    <div>
-      <a href="/">Home</a>
-      <a href="/console">Console</a>
-      <a href="/exhibit">Exhibit</a>
-      <a href="/architecture">Architecture</a>
-    </div>
-  </nav>
-
-  <h1>The autonomous fleet</h1>
-  <p class="lede">Cloud Scheduler wakes this fleet on a cron. The commander reads what earlier
-  cycles established, tasks the specialists it is <b>cleared</b> to task, and decides when to look
-  again, when a human is needed, and when to stop. What it cannot do is decide what the evidence
-  means — the verdict comes back <b>sealed</b> from the deterministic engine. Run a cycle below and
-  watch exactly what happens at 3am with nobody looking.</p>
-
-  <div class="panel">
-    <h2>Enterprise catalog <span class="note">who may task what, over what data</span></h2>
-    <div class="controls">
-      <div class="f">
-        <label for="dept-view">Viewing as department</label>
-        <select id="dept-view">
-          <option value="">— the whole fleet —</option>
-        </select>
+<body class="grid-bg">
+  <nav class="nav"><div class="nav-in">
+    <a class="brand" href="/">annaconda<span class="dot">.</span></a>
+    <div class="row">
+      <div class="nav-links">
+        <a href="/console">Case queue</a>
+        <a href="/fleet-console">Fleet</a>
+        <a href="/exhibit">Exhibit</a>
+        <a href="/consult">Mentor</a>
+        <a href="/architecture">Architecture</a>
       </div>
-      <span class="mono" id="region"></span>
+      <button class="theme" aria-label="Toggle dark mode" title="Toggle theme">☾</button>
     </div>
-    <div class="body" style="padding:0">
-      <table id="catalog"><thead><tr>
-        <th>Agent</th><th>Purpose</th><th>Cleared for</th><th>Delegates to</th><th>Manifest</th>
-      </tr></thead><tbody></tbody></table>
+  </div></nav>
+
+  <div class="page">
+    <span class="eyebrow">Autonomous operation</span>
+    <h1>The fleet, working with nobody watching</h1>
+    <p class="lede">Cloud Scheduler wakes the fleet on a cron. The commander reads what earlier cycles
+    found, tasks the specialists it is <b>cleared</b> to task, and decides when to look again, when a
+    human is needed, and when to stop. What it cannot do is decide what the evidence means — the
+    verdict comes back <span class="claim">sealed</span> from the deterministic engine. Run a cycle
+    and watch exactly what happens at 3am.</p>
+
+    <div class="panel" style="margin-top:1.6rem">
+      <header><span class="title">Enterprise catalog</span><span class="note">who may task what, over what data</span></header>
+      <div class="controls">
+        <div><label class="field" for="dept-view">Viewing as department</label>
+          <select id="dept-view"><option value="">— the whole fleet —</option></select></div>
+        <span class="region" id="region"></span>
+      </div>
+      <div class="scroll-x">
+        <table id="catalog"><thead><tr>
+          <th>Agent</th><th>Purpose</th><th>Cleared for</th><th>Delegates to</th><th>Manifest</th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <header><span class="title">Run one autonomous cycle</span><span class="note">the same code path the cron runs</span></header>
+      <div class="controls">
+        <div><label class="field" for="case-id">Case</label><select id="case-id"></select></div>
+        <div><label class="field" for="dept-run">Running as</label><select id="dept-run"></select></div>
+        <button class="btn btn-primary" id="run">Run a cycle</button>
+        <button class="btn btn-ghost" id="seed">Reset demo cases</button>
+      </div>
+      <div class="body"><div id="cycle-out" class="empty">No cycle run yet.</div></div>
+    </div>
+
+    <div class="panel">
+      <header><span class="title">Mission memory</span><span class="note">what survives to the next cycle — chain-verified</span></header>
+      <div class="body"><div id="mission-out" class="empty">Run a cycle to see the case's memory.</div></div>
     </div>
   </div>
-
-  <div class="panel">
-    <h2>Run one autonomous cycle <span class="note">the same code path the cron runs</span></h2>
-    <div class="controls">
-      <div class="f">
-        <label for="case-id">Case</label>
-        <select id="case-id"></select>
-      </div>
-      <div class="f">
-        <label for="dept-run">Running as</label>
-        <select id="dept-run"></select>
-      </div>
-      <button class="primary" id="run">Run a cycle</button>
-      <button class="ghost" id="seed">Reset demo cases</button>
-    </div>
-    <div class="body">
-      <div id="cycle-out" class="empty">No cycle run yet.</div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <h2>Mission memory <span class="note">what survives to the next cycle — chain-verified</span></h2>
-    <div class="body"><div id="mission-out" class="empty">Run a cycle to see the case's memory.</div></div>
-  </div>
-</div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -267,7 +228,7 @@ function renderEscalation(e, i, m){
     : `<span class="mono">${esc(e.acknowledged_by)}</span> <span class="dt">(asserted)</span>`;
   const state = e.acknowledged
     ? `<div class="dt">taken up by ${who} — ${esc(e.acknowledged_note)}</div>`
-    : `<div><button class="ghost ack" data-index="${i}">Take this up</button></div>`;
+    : `<div><button class="btn btn-ghost ack" data-index="${i}">Take this up</button></div>`;
   return `<div class="escal${current ? " current" : ""}${e.acknowledged ? " done" : ""}">
     <b>${esc(e.why)}</b> <span class="dt">— check: ${esc(e.what_to_check)}</span>
     ${basis}${invented}${state}</div>`;
@@ -384,5 +345,6 @@ function showErr(e){
 
 boot().catch(showErr);
 </script>
+<script src="/assets/nav.js"></script>
 </body>
 </html>

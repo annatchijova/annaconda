@@ -4,250 +4,251 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>annaconda — Live Purple Team</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/app.css">
 <style>
-  :root {
-    --paper:#eef0f1; --paper-deep:#e4e7e8; --card:#f7f8f8;
-    --ink:#191d21; --ink-soft:#5a646c; --ink-faint:#8b949a;
-    --hairline:#c9d0d2; --hairline-2:#dbe0e1;
-    --legal:#23425e; --seal:#9e2b1e; --seal-deep:#7e2016; --sealed:#2e664b; --amber:#8a6410;
-    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
-  }
-  *{box-sizing:border-box;}
-  body{margin:0;background:radial-gradient(120% 80% at 50% -10%,#f4f5f6 0%,var(--paper) 42%,var(--paper-deep) 100%);
-    color:var(--ink);font-family:var(--serif);line-height:1.5;-webkit-font-smoothing:antialiased;
-    padding:clamp(1rem,4vw,3rem) 1rem 4rem;}
-  .exhibit{max-width:980px;margin:0 auto;background:var(--card);border:1px solid var(--hairline);
-    box-shadow:0 1px 0 #fff inset,0 24px 60px -32px rgba(24,40,60,.38);position:relative;}
-  .exhibit::before{content:"";position:absolute;inset:0 auto 0 0;width:5px;background:linear-gradient(var(--legal),#16324a);}
-  header.masthead{display:grid;grid-template-columns:1fr auto;gap:1.5rem;align-items:start;
-    padding:clamp(1.4rem,3.5vw,2.4rem) clamp(1.5rem,4vw,3rem) 1.3rem;border-bottom:2px solid var(--ink);}
-  .eyebrow{font-family:var(--sans);font-size:.66rem;letter-spacing:.32em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 .5rem;}
-  h1{font-size:clamp(1.6rem,4vw,2.3rem);line-height:1.06;font-weight:600;letter-spacing:-.012em;text-wrap:balance;margin:0;}
-  h1 .thin{color:var(--ink-soft);font-weight:400;font-style:italic;}
-  .case-meta{font-family:var(--mono);font-size:.76rem;color:var(--ink-soft);margin-top:.85rem;
-    display:flex;flex-wrap:wrap;gap:.35rem 1.3rem;font-variant-numeric:tabular-nums;}
-  .case-meta b{color:var(--ink);font-weight:600;}
-  .seal{width:104px;height:104px;flex:none;border-radius:50%;display:grid;place-content:center;text-align:center;
-    font-family:var(--sans);color:#fff;transform:rotate(-7deg);
-    background:radial-gradient(circle at 38% 32%,#3e8467,var(--sealed) 46%,#1f4d38);
-    box-shadow:0 8px 20px -8px rgba(31,77,56,.8),0 1px 2px rgba(0,0,0,.3) inset;border:2px solid rgba(255,255,255,.22);
-    opacity:.35;transition:opacity .3s;}
-  .seal.active{opacity:1;animation:stamp .5s cubic-bezier(.2,1.3,.5,1) both;}
-  .seal.malice{background:radial-gradient(circle at 38% 32%,#b8412f,var(--seal) 46%,var(--seal-deep));
-    box-shadow:0 8px 20px -8px rgba(126,32,22,.8),0 1px 2px rgba(0,0,0,.3) inset;}
-  .seal .w{font-size:.92rem;font-weight:700;letter-spacing:.05em;}
-  .seal .t{font-size:.58rem;letter-spacing:.18em;opacity:.85;margin-top:2px;}
-  .seal .r{font-size:.48rem;letter-spacing:.2em;opacity:.7;margin-top:5px;text-transform:uppercase;}
-  @keyframes stamp{0%{opacity:0;transform:rotate(-7deg) scale(2);}60%{opacity:1;}100%{opacity:1;transform:rotate(-7deg) scale(1);}}
-  .controls{display:flex;flex-wrap:wrap;gap:.7rem;align-items:center;padding:1rem clamp(1.5rem,4vw,3rem);
-    border-bottom:1px solid var(--hairline);background:linear-gradient(var(--card),#eef1f1);}
-  .controls label{font-family:var(--sans);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);}
-  .controls input{font-family:var(--mono);font-size:.82rem;padding:.5rem .6rem;border:1px solid var(--hairline);
-    border-radius:3px;background:#fff;color:var(--ink);width:11rem;}
-  button{appearance:none;cursor:pointer;font-family:var(--sans);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;
-    border:0;border-radius:3px;padding:.62rem 1.2rem;transition:background .18s,transform .08s,opacity .18s;}
-  button.primary{color:#fff;background:var(--legal);}
-  button.primary:hover{background:#16324a;}
-  button.ghost{color:var(--legal);background:#fff;border:1px solid var(--hairline);}
-  button.ghost:hover{background:#eef1f4;}
-  button.danger{color:#fff;background:var(--seal);}
-  button.danger:hover{background:var(--seal-deep);}
-  button.inject{color:#fff;background:#6d3a86;}
-  button.inject:hover{background:#582d6c;}
-  button.fleet{color:#fff;background:#1f6b6b;}
-  button.fleet:hover{background:#175252;}
-  .fleetdemo{padding:1.3rem clamp(1.5rem,4vw,3rem) 1.6rem;border-top:2px solid var(--ink);background:linear-gradient(#e7f0f0,var(--card));}
-  .fleetdemo .fl{margin-bottom:1rem;color:#1f6b6b;}
-  .roles{display:grid;grid-template-columns:repeat(2,1fr);gap:.8rem;margin-bottom:1.3rem;}
-  @media(max-width:640px){.roles{grid-template-columns:1fr;}}
-  .role{background:#fff;border:1px solid var(--hairline);border-radius:5px;padding:.8rem 1rem;}
-  .role .rn{font-family:var(--sans);font-size:.78rem;font-weight:700;color:#1f6b6b;text-transform:uppercase;letter-spacing:.04em;}
-  .role .rd{font-size:.86rem;color:var(--ink-soft);margin:.2rem 0 .5rem;}
-  .role .rt{font-family:var(--mono);font-size:.74rem;color:var(--legal);}
-  .flog{list-style:none;margin:0;padding:0;}
-  .flog li{display:grid;grid-template-columns:11rem auto 1fr;gap:.6rem;align-items:baseline;padding:.4rem 0;border-bottom:1px solid var(--hairline-2);font-size:.88rem;}
-  @media(max-width:600px){.flog li{grid-template-columns:1fr;gap:.1rem;}}
-  .flog li:last-child{border-bottom:0;}
-  .flog .who{font-family:var(--mono);font-size:.76rem;color:#1f6b6b;font-weight:600;}
-  .flog .act{font-family:var(--mono);font-size:.76rem;color:var(--ink-faint);}
-  .flog .res{color:var(--ink);}
-  .flog .res.malice{color:var(--seal);font-weight:700;} .flog .res.benign{color:var(--sealed);}
-  .injectdemo{padding:1.3rem clamp(1.5rem,4vw,3rem) 1.6rem;border-top:2px solid var(--ink);background:linear-gradient(#efeaf3,var(--card));}
-  .injectdemo .fl{margin-bottom:1.1rem;color:#6d3a86;}
-  .inj-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
-  @media(max-width:720px){.inj-grid{grid-template-columns:1fr;}}
-  .inj-block{background:#fff;border:1px solid var(--hairline);border-radius:5px;padding:1rem 1.15rem;}
-  .inj-block h4{font-family:var(--sans);font-size:.72rem;letter-spacing:.06em;margin:0 0 .6rem;color:var(--ink);}
-  .inj-planted{font-family:var(--mono);font-size:.8rem;color:#6d3a86;background:#f5f0f8;border-left:3px solid #6d3a86;padding:.6rem .7rem;border-radius:3px;word-break:break-word;}
-  .inj-naive{font-size:.9rem;color:var(--ink);}
-  .inj-naive .narr{padding:.5rem 0;border-bottom:1px solid var(--hairline-2);font-style:italic;}
-  .inj-naive .narr:last-child{border-bottom:0;}
-  .inj-naive .model{font-family:var(--mono);font-size:.72rem;color:#6d3a86;font-style:normal;letter-spacing:.02em;}
-  .inj-naive .verdict-benign{color:var(--sealed);font-weight:700;font-style:normal;}
-  .inj-sealed{font-family:var(--mono);font-size:.9rem;}
-  .inj-sealed .st{color:var(--seal);font-weight:700;font-size:1.05rem;}
-  .inj-sealed .h{color:var(--ink-soft);font-size:.76rem;word-break:break-all;}
-  .inj-guard{font-size:.92rem;}
-  .inj-guard .caught{color:var(--seal);font-weight:700;}
-  .inj-inv{margin:1.2rem 0 0;font-size:.95rem;color:var(--ink);max-width:70ch;border-top:1px solid var(--hairline);padding-top:1rem;}
-  .inj-inv b{color:#6d3a86;}
-  button:active{transform:translateY(1px);}
-  button[disabled]{opacity:.5;cursor:default;}
-  button:focus-visible{outline:2px solid var(--seal);outline-offset:2px;}
-  .spinner{margin-left:auto;font-family:var(--mono);font-size:.76rem;color:var(--amber);}
-  .timeline{display:flex;flex-wrap:wrap;padding:0 clamp(1.5rem,4vw,3rem);border-bottom:1px solid var(--hairline);min-height:1px;}
-  .win{appearance:none;background:none;border:0;border-bottom:3px solid transparent;cursor:pointer;
-    font-family:var(--sans);padding:.85rem 1.1rem .95rem;display:flex;flex-direction:column;gap:.3rem;
-    color:var(--ink-soft);position:relative;transition:color .18s,border-color .18s,background .18s;}
-  .win:hover{color:var(--ink);background:rgba(35,66,94,.05);}
-  .win[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--legal);}
-  .win .s{font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;}
-  .win .st{font-family:var(--mono);font-size:.72rem;}
-  .win .dot{position:absolute;top:.6rem;right:.7rem;width:8px;height:8px;border-radius:50%;}
-  .dot.benign{background:var(--sealed);} .dot.malice{background:var(--seal);}
-  .body{padding:clamp(1.4rem,4vw,2.4rem) clamp(1.5rem,4vw,3rem);display:grid;grid-template-columns:1.25fr 1fr;gap:clamp(1.5rem,4vw,2.6rem);}
-  @media(max-width:720px){.body{grid-template-columns:1fr;}}
-  .fl{font-family:var(--sans);font-size:.64rem;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 .5rem;}
-  .vstate{font-size:clamp(1.7rem,4.6vw,2.5rem);font-weight:600;letter-spacing:-.01em;line-height:1;}
-  .vstate.malice{color:var(--seal);} .vstate.benign{color:var(--sealed);} .vstate.other{color:var(--legal);}
-  .metrics{display:flex;gap:2rem;margin-top:1.6rem;}
-  .metric .val{font-family:var(--mono);font-size:1.4rem;font-variant-numeric:tabular-nums;color:var(--ink);}
-  .metric .val small{color:var(--ink-faint);font-size:.78rem;}
-  .attack{margin-top:1.7rem;}
-  .ttp{display:flex;flex-wrap:wrap;gap:.5rem;}
-  .ttp span{font-family:var(--mono);font-size:.76rem;padding:.26rem .55rem;border:1px solid #d9b3ad;background:#fbf1ef;color:var(--seal);border-radius:2px;}
-  .ttp.empty span{color:var(--ink-faint);font-style:italic;font-family:var(--serif);border:1px dashed var(--hairline);background:none;}
-  .narrative{margin-top:1.5rem;padding-top:1.3rem;border-top:1px solid var(--hairline-2);font-size:.96rem;max-width:48ch;white-space:pre-wrap;}
-  .narrative .sn{font-family:var(--sans);font-size:.66rem;letter-spacing:.04em;color:var(--ink-faint);margin-top:.8rem;text-transform:uppercase;}
-  .agentlog{padding:1.2rem clamp(1.5rem,4vw,3rem) 1.4rem;border-top:1px solid var(--hairline);background:linear-gradient(#eef1f1,var(--card));}
-  .agentlog .fl{margin-bottom:.8rem;}
-  .alog{list-style:none;margin:0;padding:0;counter-reset:step;}
-  .alog li{position:relative;padding:.5rem 0 .5rem 2.2rem;font-size:.9rem;color:var(--ink);border-bottom:1px solid var(--hairline-2);}
-  .alog li:last-child{border-bottom:0;}
-  .alog li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:.5rem;width:1.5rem;height:1.5rem;
-    border-radius:50%;background:var(--legal);color:#fff;font-family:var(--sans);font-size:.72rem;font-weight:700;display:grid;place-content:center;}
-  .alog .act{font-family:var(--mono);font-size:.82rem;color:var(--legal);font-weight:600;}
-  .alog .rsn{color:var(--ink-soft);font-style:italic;}
-  .alog b.malice{color:var(--seal);} .alog b.benign{color:var(--sealed);} .alog b.other{color:var(--legal);}
-  .alog .tt{font-family:var(--mono);font-size:.78rem;color:var(--seal);}
-  .mltriage{padding:1.2rem clamp(1.5rem,4vw,3rem) 1.4rem;border-top:1px solid var(--hairline);}
-  .mltriage .fl{margin-bottom:.3rem;}
-  .mlnote{font-size:.86rem;color:var(--ink-soft);font-style:italic;margin:0 0 1rem;max-width:60ch;}
-  .nlist{list-style:none;margin:0;padding:0;}
-  .nlist li{display:grid;grid-template-columns:auto auto 1fr;gap:.7rem;align-items:baseline;padding:.5rem 0;border-bottom:1px solid var(--hairline-2);}
-  .nlist li:last-child{border-bottom:0;}
-  .nlist .bits{font-family:var(--mono);font-size:.9rem;font-variant-numeric:tabular-nums;color:var(--legal);font-weight:600;white-space:nowrap;}
-  .nlist .det{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;}
-  .nlist .rsn{font-size:.9rem;color:var(--ink);}
-  .custody{background:#fbfcfc;border:1px solid var(--hairline);border-radius:3px;padding:1.2rem 1.3rem;align-self:start;}
-  .chain{list-style:none;margin:1rem 0 0;padding:0;}
-  .chain li{position:relative;padding:0 0 1.4rem 1.6rem;}
-  .chain li:last-child{padding-bottom:0;}
-  .chain li::before{content:"";position:absolute;left:3px;top:4px;width:9px;height:9px;border-radius:50%;background:var(--card);border:2px solid var(--sealed);}
-  .chain li.m::before{border-color:var(--seal);}
-  .chain li::after{content:"";position:absolute;left:7px;top:15px;bottom:0;width:2px;background:var(--hairline);}
-  .chain li:last-child::after{display:none;}
-  .chain .k{font-family:var(--sans);font-size:.58rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);}
-  .chain .h{font-family:var(--mono);font-size:.8rem;color:var(--ink);font-variant-numeric:tabular-nums;word-break:break-all;}
-  .chain .v{font-family:var(--sans);font-size:.64rem;color:var(--sealed);display:inline-flex;gap:.3rem;margin-top:.15rem;}
-  .replay{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;
-    padding:1.1rem clamp(1.5rem,4vw,3rem);border-top:2px solid var(--ink);background:linear-gradient(#eef1f1,var(--card));}
-  .rs{font-family:var(--mono);font-size:.86rem;color:var(--ink-soft);font-variant-numeric:tabular-nums;}
-  .rs .ok{color:var(--sealed);font-weight:600;} .rs .work{color:var(--amber);} .rs .bad{color:var(--seal);font-weight:600;}
-  .empty-note{padding:2.5rem clamp(1.5rem,4vw,3rem);color:var(--ink-faint);font-style:italic;text-align:center;}
-  .foot{max-width:980px;margin:1.1rem auto 0;font-family:var(--sans);font-size:.66rem;color:var(--ink-faint);text-align:center;letter-spacing:.02em;line-height:1.5;}
-  @media(prefers-reduced-motion:reduce){*{animation-duration:.001s!important;}}
+  .page { max-width: 1020px; margin: 0 auto; padding: clamp(1.2rem,4vw,2rem) clamp(1rem,4vw,1.6rem) 2rem; }
+  .exhibit { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow-lg); overflow: hidden; }
+
+  .masthead { display: grid; grid-template-columns: 1fr auto; gap: 1.5rem; align-items: center;
+    padding: clamp(1.3rem,3.5vw,2rem) clamp(1.3rem,4vw,2.4rem) 1.3rem; border-bottom: 1px solid var(--line); }
+  .masthead h1 { font-size: clamp(1.5rem,3.6vw,2.1rem); margin: .3rem 0 0; }
+  .masthead h1 .thin { font-family: var(--serif); font-style: italic; color: var(--ink-soft); font-weight: 400; }
+  .case-meta { font-family: var(--mono); font-size: .68rem; letter-spacing: .06em; color: var(--ink-faint);
+    margin-top: .9rem; display: flex; flex-wrap: wrap; gap: .35rem 1.3rem; }
+  .case-meta b { color: var(--ink); font-weight: 500; }
+
+  /* the seal — an instrument stamp, not wax */
+  .seal { width: 96px; height: 96px; flex: none; border-radius: 14px; display: grid; place-content: center; text-align: center;
+    font-family: var(--mono); color: var(--cyan-deep); background: var(--cyan-wash);
+    border: 1.5px solid var(--cyan); opacity: .4; transition: opacity .3s; }
+  .seal.active { opacity: 1; animation: stamp .4s cubic-bezier(.2,1.2,.5,1) both; }
+  .seal.malice { color: var(--malice); background: var(--malice-wash); border-color: var(--malice); }
+  .seal .w { font-size: .92rem; font-weight: 600; letter-spacing: .04em; }
+  .seal .t { font-size: .56rem; letter-spacing: .12em; opacity: .85; margin-top: 3px; }
+  .seal .r { font-size: .5rem; letter-spacing: .16em; opacity: .7; margin-top: 6px; text-transform: uppercase; }
+  @keyframes stamp { 0%{opacity:0;transform:scale(1.5);} 60%{opacity:1;} 100%{opacity:1;transform:scale(1);} }
+
+  .controls { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center;
+    padding: 1rem clamp(1.3rem,4vw,2.4rem); border-bottom: 1px solid var(--line); background: var(--card-2); }
+  .controls input { width: 10rem; }
+  button.primary { color: #fff; background: var(--cyan); } button.primary:hover { background: var(--cyan-deep); }
+  button.ghost { color: var(--cyan-deep); background: var(--card); border: 1px solid var(--line); } button.ghost:hover { background: var(--card-2); border-color: var(--cyan); }
+  a.ghost { color: var(--cyan-deep); background: var(--card); border: 1px solid var(--line); }
+  button.danger { color: #fff; background: var(--malice); } button.danger:hover { background: var(--malice-deep); }
+  button.inject { color: #fff; background: var(--escalate); } button.inject:hover { filter: brightness(.9); }
+  button.fleet { color: #fff; background: var(--cyan-deep); } button.fleet:hover { filter: brightness(.92); }
+  .spinner { margin-left: auto; font-family: var(--mono); font-size: .74rem; color: var(--abstain); }
+
+  .timeline { display: flex; flex-wrap: wrap; padding: 0 clamp(1.3rem,4vw,2.4rem); border-bottom: 1px solid var(--line); }
+  .win { appearance: none; background: none; border: 0; border-bottom: 3px solid transparent; cursor: pointer;
+    font-family: var(--sans); padding: .8rem 1.05rem .9rem; display: flex; flex-direction: column; gap: .3rem;
+    color: var(--ink-soft); position: relative; transition: color .18s, border-color .18s, background .18s; }
+  .win:hover { color: var(--ink); background: var(--cyan-wash); }
+  .win[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--cyan); }
+  .win .s { font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; }
+  .win .st { font-family: var(--mono); font-size: .72rem; }
+  .win .dot { position: absolute; top: .55rem; right: .6rem; width: 8px; height: 8px; border-radius: 50%; }
+  .dot.benign { background: var(--benign); } .dot.malice { background: var(--malice); }
+
+  .body { padding: clamp(1.3rem,4vw,2.2rem) clamp(1.3rem,4vw,2.4rem); display: grid; grid-template-columns: 1.25fr 1fr; gap: clamp(1.4rem,4vw,2.4rem); }
+  @media (max-width: 720px) { .body { grid-template-columns: 1fr; } }
+  .fl { font-family: var(--mono); font-size: .6rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 .5rem; }
+  .vstate { font-family: var(--mono); font-size: clamp(1.5rem,4.4vw,2.2rem); font-weight: 600; letter-spacing: -.01em; line-height: 1; }
+  .vstate.malice { color: var(--malice); } .vstate.benign { color: var(--benign); } .vstate.other { color: var(--cyan-deep); }
+  .metrics { display: flex; gap: 2rem; margin-top: 1.5rem; }
+  .metric .val { font-family: var(--mono); font-size: 1.35rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .metric .val small { color: var(--ink-faint); font-size: .74rem; }
+  .attack { margin-top: 1.6rem; }
+  .ttp { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .ttp span { font-family: var(--mono); font-size: .74rem; padding: .26rem .55rem; border: 1px solid color-mix(in srgb, var(--malice) 35%, transparent);
+    background: var(--malice-wash); color: var(--malice); border-radius: 3px; }
+  .ttp.empty span { color: var(--ink-faint); font-style: italic; font-family: var(--sans); border: 1px dashed var(--line); background: none; }
+  .narrative { margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid var(--line-2); font-size: .94rem; line-height: 1.6; max-width: 50ch; white-space: pre-wrap; }
+  .narrative .sn { font-family: var(--mono); font-size: .6rem; letter-spacing: .06em; color: var(--ink-faint); margin-top: .8rem; text-transform: uppercase; }
+
+  .custody { background: var(--card-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 1.2rem 1.3rem; align-self: start; }
+  .chain { list-style: none; margin: 1rem 0 0; padding: 0; }
+  .chain li { position: relative; padding: 0 0 1.4rem 1.6rem; }
+  .chain li:last-child { padding-bottom: 0; }
+  .chain li::before { content: ""; position: absolute; left: 3px; top: 4px; width: 9px; height: 9px; border-radius: 50%; background: var(--card); border: 2px solid var(--cyan); }
+  .chain li.m::before { border-color: var(--malice); }
+  .chain li::after { content: ""; position: absolute; left: 7px; top: 15px; bottom: 0; width: 2px; background: var(--cyan); opacity: .35; }
+  .chain li:last-child::after { display: none; }
+  .chain .k { font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); }
+  .chain .h { font-family: var(--mono); font-size: .78rem; color: var(--ink); word-break: break-all; }
+  .chain .v { font-family: var(--mono); font-size: .62rem; color: var(--benign); display: inline-flex; gap: .3rem; margin-top: .15rem; }
+
+  .agentlog { padding: 1.2rem clamp(1.3rem,4vw,2.4rem) 1.4rem; border-top: 1px solid var(--line); background: var(--card-2); }
+  .alog { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .alog li { position: relative; padding: .5rem 0 .5rem 2.2rem; font-size: .88rem; color: var(--ink); border-bottom: 1px solid var(--line-2); }
+  .alog li:last-child { border-bottom: 0; }
+  .alog li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: .5rem;
+    width: 1.5rem; height: 1.5rem; border-radius: 50%; background: var(--cyan); color: #fff;
+    font-family: var(--mono); font-size: .72rem; font-weight: 600; display: grid; place-content: center; }
+  .alog .act { font-family: var(--mono); font-size: .8rem; color: var(--cyan-deep); font-weight: 600; }
+  .alog .rsn { color: var(--ink-soft); font-style: italic; }
+  .alog b.malice { color: var(--malice); } .alog b.benign { color: var(--benign); } .alog b.other { color: var(--cyan-deep); }
+  .alog .tt { font-family: var(--mono); font-size: .76rem; color: var(--malice); }
+
+  .mltriage { padding: 1.2rem clamp(1.3rem,4vw,2.4rem) 1.4rem; border-top: 1px solid var(--line); }
+  .mlnote { font-size: .84rem; color: var(--ink-soft); font-style: italic; margin: 0 0 1rem; max-width: 60ch; }
+  .nlist { list-style: none; margin: 0; padding: 0; }
+  .nlist li { display: grid; grid-template-columns: auto auto 1fr; gap: .7rem; align-items: baseline; padding: .5rem 0; border-bottom: 1px solid var(--line-2); }
+  .nlist li:last-child { border-bottom: 0; }
+  .nlist .bits { font-family: var(--mono); font-size: .88rem; font-variant-numeric: tabular-nums; color: var(--cyan-deep); font-weight: 600; white-space: nowrap; }
+  .nlist .det { font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+  .nlist .rsn { font-size: .88rem; color: var(--ink); }
+
+  .injectdemo { padding: 1.3rem clamp(1.3rem,4vw,2.4rem) 1.6rem; border-top: 1px solid var(--line); background: var(--escalate-wash); }
+  .injectdemo .fl { color: var(--escalate); }
+  .inj-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 720px) { .inj-grid { grid-template-columns: 1fr; } }
+  .inj-block { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 1rem 1.15rem; }
+  .inj-block h4 { font-family: var(--sans); font-size: .72rem; letter-spacing: .04em; margin: 0 0 .6rem; color: var(--ink); }
+  .inj-planted { font-family: var(--mono); font-size: .78rem; color: var(--escalate); background: var(--escalate-wash);
+    border-left: 3px solid var(--escalate); padding: .6rem .7rem; border-radius: 3px; word-break: break-word; }
+  .inj-naive { font-size: .88rem; color: var(--ink); }
+  .inj-naive .narr { padding: .5rem 0; border-bottom: 1px solid var(--line-2); font-style: italic; }
+  .inj-naive .narr:last-child { border-bottom: 0; }
+  .inj-naive .model { font-family: var(--mono); font-size: .7rem; color: var(--escalate); font-style: normal; }
+  .inj-naive .verdict-benign { color: var(--benign); font-weight: 600; font-style: normal; }
+  .inj-sealed { font-family: var(--mono); font-size: .88rem; }
+  .inj-sealed .st { color: var(--malice); font-weight: 600; font-size: 1.05rem; }
+  .inj-sealed .h { color: var(--ink-soft); font-size: .74rem; word-break: break-all; }
+  .inj-guard { font-size: .9rem; }
+  .inj-guard .caught { color: var(--malice); font-weight: 600; }
+  .inj-inv { margin: 1.2rem 0 0; font-size: .92rem; color: var(--ink); max-width: 70ch; border-top: 1px solid var(--line); padding-top: 1rem; }
+  .inj-inv b { color: var(--escalate); }
+
+  .fleetdemo { padding: 1.3rem clamp(1.3rem,4vw,2.4rem) 1.6rem; border-top: 1px solid var(--line); background: var(--cyan-wash); }
+  .fleetdemo .fl { color: var(--cyan-deep); }
+  .roles { display: grid; grid-template-columns: repeat(2,1fr); gap: .8rem; margin-bottom: 1.3rem; }
+  @media (max-width: 640px) { .roles { grid-template-columns: 1fr; } }
+  .role { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .8rem 1rem; }
+  .role .rn { font-family: var(--mono); font-size: .74rem; font-weight: 600; color: var(--cyan-deep); text-transform: uppercase; letter-spacing: .04em; }
+  .role .rd { font-size: .84rem; color: var(--ink-soft); margin: .25rem 0 .5rem; }
+  .role .rt { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); }
+  .flog { list-style: none; margin: 0; padding: 0; }
+  .flog li { display: grid; grid-template-columns: 11rem auto 1fr; gap: .6rem; align-items: baseline; padding: .45rem 0; border-bottom: 1px solid var(--line-2); font-size: .86rem; }
+  @media (max-width: 600px) { .flog li { grid-template-columns: 1fr; gap: .1rem; } }
+  .flog li:last-child { border-bottom: 0; }
+  .flog .who { font-family: var(--mono); font-size: .74rem; color: var(--cyan-deep); font-weight: 600; }
+  .flog .act { font-family: var(--mono); font-size: .74rem; color: var(--ink-faint); }
+  .flog .res.malice { color: var(--malice); font-weight: 600; } .flog .res.benign { color: var(--benign); }
+
+  .replay { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+    padding: 1.1rem clamp(1.3rem,4vw,2.4rem); border-top: 1px solid var(--line); background: var(--card-2); }
+  .rs { font-family: var(--mono); font-size: .84rem; color: var(--ink-soft); }
+  .rs .ok { color: var(--benign); font-weight: 600; } .rs .work { color: var(--abstain); } .rs .bad { color: var(--malice); font-weight: 600; }
+  .empty-note { padding: 2.5rem clamp(1.3rem,4vw,2.4rem); color: var(--ink-faint); font-style: italic; text-align: center; }
+  .foot-note { max-width: 1020px; margin: 1.1rem auto 0; font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); text-align: center; line-height: 1.6; }
 </style>
 </head>
-<body>
-<main class="exhibit">
-  <header class="masthead">
-    <div>
-      <p class="eyebrow"><a href="/" style="color:inherit;text-decoration:none;">&larr; annaconda</a> &middot; Live Purple Team &middot; Forensic Exhibit</p>
-      <h1>Sealed verdict over <span class="thin">live endpoint telemetry</span></h1>
-      <div class="case-meta">
-        <span>CASE&nbsp; <b id="mCase">—</b></span>
-        <span>HOST&nbsp; <b>WIN11-VICTIM</b></span>
-        <span>EXAMINER&nbsp; <b id="mExam">purple-op-01</b></span>
-        <span>ENDPOINT&nbsp; <b id="mScenario">—</b></span>
-        <span>ENGINE&nbsp; <b id="mModel">—</b></span>
+<body class="grid-bg">
+  <nav class="nav"><div class="nav-in">
+    <a class="brand" href="/">annaconda<span class="dot">.</span></a>
+    <div class="row">
+      <div class="nav-links">
+        <a href="/console">Case queue</a>
+        <a href="/fleet-console">Fleet</a>
+        <a href="/exhibit">Exhibit</a>
+        <a href="/consult">Mentor</a>
+        <a href="/architecture">Architecture</a>
       </div>
+      <button class="theme" aria-label="Toggle dark mode" title="Toggle theme">☾</button>
     </div>
-    <div class="seal" id="seal" aria-hidden="true">
-      <div><div class="w" id="sealW">SEAL</div><div class="t" id="sealT"></div><div class="r">sha-256</div></div>
-    </div>
-  </header>
+  </div></nav>
 
-  <div class="controls">
-    <label for="caseId">Case</label>
-    <input id="caseId" value="DEMO-001" spellcheck="false">
-    <button class="primary" id="runBtn">Run sealed investigation</button>
-    <button class="danger" id="attackBtn">Run attack scenario</button>
-    <button class="inject" id="injectBtn">Prompt-injection attack</button>
-    <button class="fleet" id="fleetBtn">Run the fleet</button>
-    <button class="ghost" id="agentBtn">Ask the agent</button>
-    <a class="ghost" href="/console" style="text-decoration:none;display:inline-block;line-height:1;padding:.62rem 1.2rem;">Case queue &rarr;</a>
-    <a class="ghost" href="/consult" style="text-decoration:none;display:inline-block;line-height:1;padding:.62rem 1.2rem;">Mentor &rarr;</a>
-    <span class="spinner" id="spin"></span>
+  <div class="page">
+  <main class="exhibit">
+    <header class="masthead">
+      <div>
+        <span class="eyebrow">Forensic exhibit</span>
+        <h1>Sealed verdict over <span class="thin">live endpoint telemetry</span></h1>
+        <div class="case-meta">
+          <span>CASE <b id="mCase">—</b></span>
+          <span>HOST <b>WIN11-VICTIM</b></span>
+          <span>EXAMINER <b id="mExam">purple-op-01</b></span>
+          <span>ENDPOINT <b id="mScenario">—</b></span>
+          <span>ENGINE <b id="mModel">—</b></span>
+        </div>
+      </div>
+      <div class="seal" id="seal" aria-hidden="true">
+        <div><div class="w" id="sealW">SEAL</div><div class="t" id="sealT"></div><div class="r">sha-256</div></div>
+      </div>
+    </header>
+
+    <div class="controls">
+      <label class="field" for="caseId">Case</label>
+      <input id="caseId" value="DEMO-001" spellcheck="false">
+      <button class="btn primary" id="runBtn">Run sealed investigation</button>
+      <button class="btn danger" id="attackBtn">Run attack scenario</button>
+      <button class="btn inject" id="injectBtn">Prompt-injection attack</button>
+      <button class="btn fleet" id="fleetBtn">Run the fleet</button>
+      <button class="btn ghost" id="agentBtn">Ask the agent</button>
+      <span class="spinner" id="spin"></span>
+    </div>
+
+    <nav class="timeline" id="timeline" role="tablist" aria-label="Evidence windows"></nav>
+
+    <section class="body" id="bodyPanel" hidden>
+      <div class="left">
+        <p class="fl">Adjudicated verdict</p>
+        <div class="vstate" id="vState">—</div>
+        <div class="metrics">
+          <div class="metric"><p class="fl">Score</p><div class="val" id="vScore">—</div></div>
+          <div class="metric"><p class="fl">Confidence</p><div class="val" id="vConf">—</div></div>
+        </div>
+        <div class="attack"><p class="fl">MITRE ATT&amp;CK</p><div class="ttp empty" id="vTtp"><span>none corroborated</span></div></div>
+        <div class="narrative" id="vNarr" hidden></div>
+      </div>
+      <aside class="custody">
+        <p class="fl">Chain of custody</p>
+        <ol class="chain" id="chain"></ol>
+      </aside>
+    </section>
+
+    <section class="agentlog" id="agentLog" hidden>
+      <p class="fl">Agent investigation log · what the agent decided, step by step</p>
+      <ol class="alog" id="alog"></ol>
+    </section>
+
+    <section class="mltriage" id="mlTriage" hidden>
+      <p class="fl">ML triage · events the surprisal ensemble nominated for review</p>
+      <p class="mlnote">The model surfaces candidates in bits of surprisal — it never decides. Only the deterministic engine sealed the verdict above.</p>
+      <ol class="nlist" id="nlist"></ol>
+    </section>
+
+    <section class="injectdemo" id="injectDemo" hidden>
+      <p class="fl">Attacker-controlled evidence · the genuine threat of an LLM in DFIR</p>
+      <div class="inj-grid">
+        <div class="inj-block"><h4>1 · The attacker wrote this into the telemetry</h4><div class="inj-planted" id="injPlanted"></div></div>
+        <div class="inj-block"><h4>2 · Two different models narrate the same case</h4><div class="inj-naive" id="injNaive"></div></div>
+        <div class="inj-block"><h4>3 · One sealed verdict, both narrators — produced before any model ran</h4><div class="inj-sealed" id="injSealed"></div></div>
+        <div class="inj-block"><h4>4 · The guard caught the lie</h4><div class="inj-guard" id="injGuard"></div></div>
+      </div>
+      <p class="inj-inv" id="injInv"></p>
+    </section>
+
+    <section class="fleetdemo" id="fleetDemo" hidden>
+      <p class="fl">Specialized fleet · strictly disjoint tool contracts, one sealed chain</p>
+      <div class="roles" id="fleetRoles"></div>
+      <ol class="flog" id="fleetLog"></ol>
+    </section>
+
+    <div class="empty-note" id="emptyNote">Run an investigation to freeze evidence windows and seal their verdicts.</div>
+
+    <footer class="replay">
+      <div class="rs" id="replayStatus">No sealed chain yet.</div>
+      <button class="btn ghost" id="replayBtn" disabled>Replay &amp; re-verify seals</button>
+    </footer>
+  </main>
+  <p class="foot-note">Determinism is the claim: re-verifying the recorded windows reproduces every seal. Swap the narrator and the verdict never changes — the model is out of the decision path.</p>
   </div>
-
-  <nav class="timeline" id="timeline" role="tablist" aria-label="Evidence windows"></nav>
-
-  <section class="body" id="bodyPanel" hidden>
-    <div class="left">
-      <p class="fl">Adjudicated verdict</p>
-      <div class="vstate" id="vState">—</div>
-      <div class="metrics">
-        <div class="metric"><p class="fl">Score</p><div class="val" id="vScore">—</div></div>
-        <div class="metric"><p class="fl">Confidence</p><div class="val" id="vConf">—</div></div>
-      </div>
-      <div class="attack"><p class="fl">MITRE ATT&amp;CK</p><div class="ttp empty" id="vTtp"><span>none corroborated</span></div></div>
-      <div class="narrative" id="vNarr" hidden></div>
-    </div>
-    <aside class="custody">
-      <p class="fl">Chain of custody</p>
-      <ol class="chain" id="chain"></ol>
-    </aside>
-  </section>
-
-  <section class="agentlog" id="agentLog" hidden>
-    <p class="fl">Agent investigation log &middot; what the agent decided, step by step</p>
-    <ol class="alog" id="alog"></ol>
-  </section>
-
-  <section class="mltriage" id="mlTriage" hidden>
-    <p class="fl">ML triage &middot; events the surprisal ensemble nominated for review</p>
-    <p class="mlnote">The model surfaces candidates in bits of surprisal &mdash; it never decides. Only the deterministic engine sealed the verdict above.</p>
-    <ol class="nlist" id="nlist"></ol>
-  </section>
-
-  <section class="injectdemo" id="injectDemo" hidden>
-    <p class="fl">Attacker-controlled evidence &middot; the genuine threat of an LLM in DFIR</p>
-    <div class="inj-grid">
-      <div class="inj-block"><h4>1 &middot; The attacker wrote this into the telemetry</h4><div class="inj-planted" id="injPlanted"></div></div>
-      <div class="inj-block"><h4>2 &middot; Two different models narrate the same case</h4><div class="inj-naive" id="injNaive"></div></div>
-      <div class="inj-block"><h4>3 &middot; One sealed verdict, both narrators &mdash; produced before any model ran</h4><div class="inj-sealed" id="injSealed"></div></div>
-      <div class="inj-block"><h4>4 &middot; The guard caught the lie</h4><div class="inj-guard" id="injGuard"></div></div>
-    </div>
-    <p class="inj-inv" id="injInv"></p>
-  </section>
-
-  <section class="fleetdemo" id="fleetDemo" hidden>
-    <p class="fl">Specialized fleet &middot; strictly disjoint tool contracts, one sealed chain</p>
-    <div class="roles" id="fleetRoles"></div>
-    <ol class="flog" id="fleetLog"></ol>
-  </section>
-
-  <div class="empty-note" id="emptyNote">Run an investigation to freeze evidence windows and seal their verdicts.</div>
-
-  <footer class="replay">
-    <div class="rs" id="replayStatus">No sealed chain yet.</div>
-    <button class="ghost" id="replayBtn" disabled>Replay &amp; re-verify seals</button>
-  </footer>
-</main>
-<p class="foot">Determinism is the claim: re-verifying the recorded windows reproduces every seal. Swap the narrator and the verdict never changes &mdash; the model is out of the decision path.</p>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -260,15 +261,12 @@ async function health(){
 }
 
 async function investigate(mode, scenario){
-  // Run buttons pass an explicit scenario and make it active; "Ask the agent"
-  // passes none and inherits whatever endpoint is currently active — so the
-  // agent investigates what you're looking at, not always the benign default.
   scenario=scenario||STATE.scenario||"benign";
   STATE.scenario=scenario;
   const caseId=$("caseId").value.trim()||"DEMO-001";
   $("mCase").textContent=caseId;
   $("mScenario").textContent=scenario==="attack"?"compromised":"benign";
-  $("mScenario").style.color=scenario==="attack"?"var(--seal)":"var(--sealed)";
+  $("mScenario").style.color=scenario==="attack"?"var(--malice)":"var(--benign)";
   setBusy(true, mode==="agent"?"agent investigating (Gemini)…":(scenario==="attack"?"analyzing compromised endpoint…":"sealing windows…"));
   try{
     const payload={case_id:caseId,examiner_id:"purple-op-01",mode,scenario};
@@ -287,7 +285,6 @@ function setBusy(b,msg){ $("spin").textContent=b?msg:""; $("runBtn").disabled=b;
 function render(){
   const inv=STATE.inv; if(!inv||!inv.verdicts.length){ return; }
   $("emptyNote").hidden=true; $("bodyPanel").hidden=false;
-  // timeline
   const tl=$("timeline"); tl.innerHTML="";
   inv.verdicts.forEach((v,i)=>{
     const cls=stateClass(v.verdict_state);
@@ -299,17 +296,15 @@ function render(){
     tl.appendChild(b);
   });
   showWindow(inv.verdicts.length-1);
-  // replay ready
   $("replayBtn").disabled=false;
   const n=inv.verdicts.length;
-  $("replayStatus").innerHTML='Chain sealed &middot; '+n+' window'+(n>1?'s':'')+' &middot; <span class="ok">integrity '+(inv.chain.chain_ok?'verified ✓':'BROKEN ✗')+'</span>';
+  $("replayStatus").innerHTML='Chain sealed · '+n+' window'+(n>1?'s':'')+' · <span class="ok">integrity '+(inv.chain.chain_ok?'verified ✓':'BROKEN ✗')+'</span>';
   renderAgentLog();
   renderTriage();
 }
 
 function renderAgentLog(){
   const inv=STATE.inv, log=$("agentLog");
-  // Show the agent's reasoning trace when the agent drove the investigation.
   if(!inv.narration || !Array.isArray(inv.audit_trail) || !inv.audit_trail.length){ log.hidden=true; return; }
   const steps=inv.audit_trail.filter(a=>a.action!=="verify_chain"||true).map(a=>{
     const d=a.detail||{};
@@ -347,11 +342,9 @@ function showWindow(i){
   const ttp=$("vTtp"), techs=v.mitre_techniques||[];
   if(techs.length){ ttp.className="ttp"; ttp.innerHTML=techs.map(t=>'<span>'+t+'</span>').join(""); }
   else{ ttp.className="ttp empty"; ttp.innerHTML='<span>none corroborated</span>'; }
-  // narration (agent mode)
   const nn=$("vNarr");
   if(inv.narration){ nn.hidden=false; nn.textContent=inv.narration; nn.innerHTML+='<div class="sn">Narrative stored beside the seal — never inside it</div>'; }
   else{ nn.hidden=true; }
-  // custody chain from stream entry
   const entry=inv.stream[i]||{};
   const rows=[
     ["prev entry",(entry.prev_entry_hash||"").slice(0,24)+"…",false],
@@ -365,10 +358,10 @@ async function replay(){
   const inv=STATE.inv; if(!inv) return;
   $("replayBtn").disabled=true;
   const rs=$("replayStatus"); const n=inv.verdicts.length;
-  for(let k=0;k<n;k++){ rs.innerHTML='Re-verifying window '+String(k).padStart(2,"0")+' &middot; <span class="work">deriving seal…</span>'; await sleep(650); }
+  for(let k=0;k<n;k++){ rs.innerHTML='Re-verifying window '+String(k).padStart(2,"0")+' · <span class="work">deriving seal…</span>'; await sleep(650); }
   try{
     const r=await (await fetch("/investigations/"+inv.investigation_id+"/stream")).json();
-    if(r.chain_ok){ rs.innerHTML='Replay complete &middot; <span class="ok">'+n+'/'+n+' seals reproduced — HASHES MATCH ✓</span>'; }
+    if(r.chain_ok){ rs.innerHTML='Replay complete · <span class="ok">'+n+'/'+n+' seals reproduced — HASHES MATCH ✓</span>'; }
     else{ rs.innerHTML='<span class="bad">Replay MISMATCH — chain integrity failed</span>'; }
   }catch(e){ rs.innerHTML='<span class="bad">Replay error: '+e.message+'</span>'; }
   $("replayBtn").disabled=false;
@@ -395,10 +388,10 @@ async function fleetDemo(){
       const cls=(e.verdict_state||'').startsWith('MALICE')?'malice':(e.verdict_state||'').startsWith('BENIGN')?'benign':'';
       const tt=(e.mitre_techniques||[]).join(' ');
       return '<li><span class="who">'+e.role+'</span><span class="act">'+e.action+'</span>'
-        +'<span class="res '+cls+'">'+res+(tt?' &middot; '+tt:'')+'</span></li>';
+        +'<span class="res '+cls+'">'+res+(tt?' · '+tt:'')+'</span></li>';
     }).join("");
     $("fleetDemo").hidden=false;
-    $("replayStatus").innerHTML='Fleet sealed &middot; <span class="'+((r.worst_verdict||'').startsWith('MALICE')?'bad':'ok')+'">worst verdict '+(r.worst_verdict||'—').replace("_"," ")+'</span> &middot; chain '+(r.chain.chain_ok?'verified ✓':'BROKEN')+'';
+    $("replayStatus").innerHTML='Fleet sealed · <span class="'+((r.worst_verdict||'').startsWith('MALICE')?'bad':'ok')+'">worst verdict '+(r.worst_verdict||'—').replace("_"," ")+'</span> · chain '+(r.chain.chain_ok?'verified ✓':'BROKEN')+'';
     $("replayBtn").disabled=true;
   }catch(e){ $("replayStatus").innerHTML='<span class="bad">Fleet run failed: '+e.message+'</span>'; }
   finally{ setBusy(false,""); $("fleetBtn").disabled=false; }
@@ -409,16 +402,15 @@ async function injectionDemo(){
   $("injectBtn").disabled=true;
   try{
     const r=await (await fetch("/injection-demo",{method:"POST"})).json();
-    // hide the normal panels, show the injection story
     $("bodyPanel").hidden=true; $("agentLog").hidden=true; $("mlTriage").hidden=true;
     $("timeline").innerHTML=""; $("emptyNote").hidden=true;
     $("injPlanted").textContent=r.planted_instruction||"(none found)";
-    const unavail='<span style="color:#9e2b1e">this model is currently unavailable — the sealed verdict below is unaffected</span>';
+    const unavail='<span style="color:var(--malice)">this model is currently unavailable — the sealed verdict below is unaffected</span>';
     const nv=r.naive_available===false?unavail:(r.naive_narration||"").replace(/[<>]/g,"").replace(/\bbenign\b/gi,'<span class="verdict-benign">benign</span>');
     const fv=r.faithful_available===false?unavail:(r.faithful_narration||"").replace(/[<>]/g,"");
     $("injNaive").innerHTML=
-      '<div class="narr"><span class="model">'+(r.naive_model||"model A")+' &middot; naive</span><br>'+nv+'</div>'
-      +'<div class="narr"><span class="model">'+(r.faithful_model||"model B")+' &middot; faithful</span><br>'+fv+'</div>';
+      '<div class="narr"><span class="model">'+(r.naive_model||"model A")+' · naive</span><br>'+nv+'</div>'
+      +'<div class="narr"><span class="model">'+(r.faithful_model||"model B")+' · faithful</span><br>'+fv+'</div>';
     const s=r.sealed_verdict;
     $("injSealed").innerHTML='<span class="st">'+s.state.replace("_"," ")+'</span> '
       +(s.mitre_techniques||[]).join(" ")+'<br><span class="h">entry '+s.entry_hash+'</span>';
@@ -436,5 +428,6 @@ async function injectionDemo(){
 $("replayBtn").onclick=replay;
 health();
 </script>
+<script src="/assets/nav.js"></script>
 </body>
 </html>

@@ -4,191 +4,169 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>annaconda — how it works end to end</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/app.css">
 <style>
-  :root{
-    --paper:#eef0f1;--paper-deep:#e4e7e8;--card:#f7f8f8;
-    --ink:#191d21;--ink-soft:#5a646c;--ink-faint:#8b949a;
-    --hairline:#c9d0d2;--hairline-2:#dbe0e1;
-    --legal:#23425e;--seal:#9e2b1e;--seal-deep:#7e2016;--sealed:#2e664b;--amber:#8a6410;
-    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
-  }
-  *{box-sizing:border-box;}
-  body{margin:0;background:radial-gradient(130% 90% at 50% -8%,#f5f6f7 0%,var(--paper) 40%,var(--paper-deep) 100%);
-    color:var(--ink);font-family:var(--serif);line-height:1.6;-webkit-font-smoothing:antialiased;
-    padding:clamp(1rem,4vw,3rem) 1rem 4rem;}
-  .wrap{max-width:860px;margin:0 auto;}
-  .eyebrow{font-family:var(--sans);font-size:.66rem;letter-spacing:.32em;text-transform:uppercase;color:var(--ink-soft);margin:0 0 .5rem;}
-  h1{font-size:clamp(1.9rem,5vw,2.9rem);line-height:1.04;font-weight:600;letter-spacing:-.015em;text-wrap:balance;margin:.4rem 0 0;}
-  h1 .thin{color:var(--ink-soft);font-weight:400;font-style:italic;}
-  .lede{font-size:clamp(1.02rem,2.2vw,1.2rem);color:var(--ink-soft);max-width:60ch;margin:1rem 0 0;}
-  .lede b{color:var(--legal);}
+  .page { max-width: 880px; margin: 0 auto; padding: clamp(1.4rem,4vw,2.4rem) clamp(1rem,4vw,1.6rem) 4rem; }
+  .lede b { color: var(--ink); font-weight: 600; }
+  h1 .thin { font-family: var(--serif); font-style: italic; color: var(--ink-soft); font-weight: 400; }
 
-  .flow{margin-top:2.4rem;position:relative;}
-  .step{display:grid;grid-template-columns:auto 1fr;gap:1.1rem;padding:0 0 .3rem;}
-  .rail{display:flex;flex-direction:column;align-items:center;}
-  .num{width:2.1rem;height:2.1rem;flex:none;border-radius:50%;display:grid;place-content:center;
-    font-family:var(--sans);font-size:.9rem;font-weight:700;color:#fff;background:var(--legal);z-index:1;}
-  .step.core .num{background:var(--sealed);}
-  .step.back .num{background:var(--ink-soft);}
-  .line{width:2px;flex:1;background:var(--hairline);margin:2px 0;min-height:1.1rem;}
-  .card{background:var(--card);border:1px solid var(--hairline);border-radius:5px;padding:.9rem 1.15rem;margin-bottom:1.1rem;}
-  .card h3{font-family:var(--sans);font-size:.96rem;margin:0 0 .3rem;letter-spacing:.005em;}
-  .card p{margin:.15rem 0 0;font-size:.95rem;color:var(--ink);}
-  .card .where{font-family:var(--mono);font-size:.76rem;color:var(--legal);margin-top:.5rem;word-break:break-word;}
-  .card .note{color:var(--ink-soft);font-size:.9rem;font-style:italic;margin-top:.4rem;}
+  .flow { margin-top: 2.4rem; }
+  .step { display: grid; grid-template-columns: auto 1fr; gap: 1.1rem; }
+  .rail { display: flex; flex-direction: column; align-items: center; }
+  .num { width: 2rem; height: 2rem; flex: none; border-radius: 50%; display: grid; place-content: center;
+    font-family: var(--mono); font-size: .85rem; font-weight: 600; color: #fff; background: var(--ink-soft); z-index: 1; }
+  .step.core .num { background: var(--cyan); }
+  .step.back .num { background: var(--ink-faint); }
+  .line { width: 2px; flex: 1; background: var(--line); margin: 2px 0; min-height: 1.1rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: .95rem 1.15rem; margin-bottom: 1.1rem; box-shadow: var(--shadow); }
+  .card h3 { font-size: .96rem; margin: 0 0 .3rem; }
+  .card p { margin: .15rem 0 0; font-size: .92rem; color: var(--ink); line-height: 1.55; }
+  .card .where { font-family: var(--mono); font-size: .72rem; color: var(--cyan-deep); margin-top: .55rem; word-break: break-word; }
+  .card .note { color: var(--ink-soft); font-size: .86rem; font-style: italic; margin-top: .45rem; }
+  .seal-word { color: var(--malice); font-weight: 600; font-family: var(--mono); }
 
-  /* trust boundary */
-  .boundary{grid-column:1 / -1;margin:.2rem 0 1.4rem;padding:.75rem 1.1rem;border-radius:5px;
-    background:#fbf1ef;border:1px solid #d9b3ad;border-left:5px solid var(--seal);}
-  .boundary .t{font-family:var(--sans);font-size:.64rem;letter-spacing:.22em;text-transform:uppercase;color:var(--seal);font-weight:700;}
-  .boundary p{margin:.35rem 0 0;font-size:.95rem;color:var(--ink);}
-  .boundary b{color:var(--seal);}
+  .boundary-card { grid-column: 1 / -1; margin: .2rem 0 1.4rem; padding: .85rem 1.1rem; border-radius: var(--radius);
+    background: var(--malice-wash); border: 1px solid color-mix(in srgb, var(--malice) 35%, transparent);
+    border-left: 4px solid var(--malice); }
+  .boundary-card .t { font-family: var(--mono); font-size: .64rem; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--malice); font-weight: 600; }
+  .boundary-card p { margin: .4rem 0 0; font-size: .92rem; color: var(--ink); line-height: 1.55; }
+  .boundary-card b { color: var(--malice); }
 
-  /* tools callout */
-  .tools{margin-top:2.6rem;background:var(--card);border:1px solid var(--hairline);border-radius:6px;padding:1.5rem 1.6rem;}
-  .tools h2{font-size:1.35rem;margin:0 0 .3rem;letter-spacing:-.01em;}
-  .tools .sub{color:var(--ink-soft);margin:0 0 1.1rem;font-size:.96rem;}
-  .toolgrid{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;}
-  @media(max-width:600px){.toolgrid{grid-template-columns:1fr;}}
-  .tool{border:1px solid var(--hairline-2);border-radius:4px;padding:.7rem .85rem;background:#fff;}
-  .tool code{font-family:var(--mono);font-size:.82rem;color:var(--legal);font-weight:600;}
-  .tool span{display:block;font-size:.85rem;color:var(--ink-soft);margin-top:.25rem;}
-  .tools .kicker{margin-top:1.1rem;font-size:.95rem;color:var(--ink);}
-  .tools .kicker b{color:var(--seal);}
+  .tools { margin-top: 2.6rem; }
+  .tools .sub { color: var(--ink-soft); margin: 0 0 1.1rem; font-size: .95rem; }
+  .toolgrid { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+  @media (max-width: 600px) { .toolgrid { grid-template-columns: 1fr; } }
+  .tool { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .75rem .9rem; background: var(--card); }
+  .tool code { font-family: var(--mono); font-size: .8rem; color: var(--cyan-deep); font-weight: 600; }
+  .tool span { display: block; font-size: .84rem; color: var(--ink-soft); margin-top: .3rem; line-height: 1.5; }
+  .kicker { margin-top: 1.1rem; font-size: .95rem; color: var(--ink); }
+  .kicker b { color: var(--cyan-deep); }
 
-  .two{margin-top:1.4rem;display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
-  @media(max-width:600px){.two{grid-template-columns:1fr;}}
-  .agentbox{border:1px solid var(--hairline);border-radius:5px;padding:1.1rem 1.2rem;background:var(--card);}
-  .agentbox .tag{font-family:var(--sans);font-size:.58rem;letter-spacing:.2em;text-transform:uppercase;color:#fff;padding:.22rem .5rem;border-radius:3px;background:var(--legal);}
-  .agentbox.mentor .tag{background:var(--sealed);}
-  .agentbox h3{margin:.7rem 0 .3rem;font-size:1.05rem;}
-  .agentbox p{margin:0;font-size:.9rem;color:var(--ink-soft);}
+  .two { margin-top: 1.4rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 600px) { .two { grid-template-columns: 1fr; } }
+  .agentbox { border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.2rem; background: var(--card); box-shadow: var(--shadow); }
+  .agentbox .tag { font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase;
+    color: #fff; padding: .24rem .5rem; border-radius: 3px; background: var(--ink-soft); border: 0; }
+  .agentbox.mentor .tag { background: var(--benign); }
+  .agentbox h3 { margin: .7rem 0 .3rem; font-size: 1.02rem; }
+  .agentbox p { margin: 0; font-size: .88rem; color: var(--ink-soft); }
 
-  .close{margin-top:2.4rem;border-top:2px solid var(--ink);padding-top:1.4rem;font-size:1.05rem;max-width:62ch;}
-  .close b{color:var(--legal);}
-  .seal-word{color:var(--seal);font-weight:600;}
+  .close { margin-top: 2.6rem; border-top: 1px solid var(--line); padding-top: 1.4rem; font-size: 1.02rem;
+    max-width: 64ch; color: var(--ink-soft); }
+  .close b { color: var(--ink); font-weight: 600; }
 </style>
-
 </head>
-<body>
-<nav style="max-width:860px;margin:0 auto 0;padding:1.1rem clamp(1rem,4vw,0);display:flex;justify-content:space-between;align-items:center;font-family:system-ui,sans-serif;">
-  <span style="font-weight:700;letter-spacing:.12em;font-size:.9rem;">annaconda<span style="color:#23425e;">.</span></span>
-  <span>
-    <a href="/" style="font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:#23425e;text-decoration:none;border:1px solid #c9d0d2;border-radius:4px;padding:.5rem .9rem;background:#fff;margin-left:.4rem;">Home</a>
-    <a href="/console" style="font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:#23425e;text-decoration:none;border:1px solid #c9d0d2;border-radius:4px;padding:.5rem .9rem;background:#fff;margin-left:.4rem;">Console</a>
-      <a href="/fleet-console" style="font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:#23425e;text-decoration:none;border:1px solid #c9d0d2;border-radius:4px;padding:.5rem .9rem;background:#fff;margin-left:.4rem;">Fleet</a>
-    <a href="/exhibit" style="font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:#23425e;text-decoration:none;border:1px solid #c9d0d2;border-radius:4px;padding:.5rem .9rem;background:#fff;margin-left:.4rem;">Exhibit</a>
-  </span>
-</nav><div class="wrap">
-  <p class="eyebrow">annaconda &middot; architecture</p>
-  <h1>How it works, <span class="thin">end to end</span></h1>
-  <p class="lede">Follow one request — you click <b>Ask the agent</b> on a compromised endpoint. Here is everything it touches, in order. The rule to hold onto: the model decides <b>what to investigate</b> and how to <b>describe</b> it; the deterministic engine decides the <b>verdict</b> and seals it.</p>
-
-  <div class="flow">
-
-    <div class="step">
-      <div class="rail"><div class="num">1</div><div class="line"></div></div>
-      <div class="card">
-        <h3>Your browser</h3>
-        <p>You click a button. The page sends one request: "investigate this endpoint with the agent."</p>
-        <div class="where">service/static/index.html → POST /investigate {mode:"agent", scenario:"attack"}</div>
+<body class="grid-bg">
+  <nav class="nav"><div class="nav-in">
+    <a class="brand" href="/">annaconda<span class="dot">.</span></a>
+    <div class="row">
+      <div class="nav-links">
+        <a href="/console">Case queue</a>
+        <a href="/fleet-console">Fleet</a>
+        <a href="/exhibit">Exhibit</a>
+        <a href="/consult">Mentor</a>
+        <a href="/architecture">Architecture</a>
       </div>
+      <button class="theme" aria-label="Toggle dark mode" title="Toggle theme">☾</button>
     </div>
+  </div></nav>
 
-    <div class="step">
-      <div class="rail"><div class="num">2</div><div class="line"></div></div>
-      <div class="card">
-        <h3>The backend, on Google Cloud Run</h3>
-        <p>A small web service receives the request and sets up one investigation session, wired to this endpoint's telemetry. Then it hands the wheel to the agent.</p>
-        <div class="where">service/app.py → investigate() → PurpleTeamSession</div>
+  <div class="page">
+    <span class="eyebrow">Architecture</span>
+    <h1>How it works, <span class="thin">end to end</span></h1>
+    <p class="lede">Follow one request — you click <b>Ask the agent</b> on a compromised endpoint. Here is
+    everything it touches, in order. The rule to hold onto: the model decides <b>what to investigate</b>
+    and how to <b>describe</b> it; the deterministic engine decides the <b>verdict</b> and seals it.</p>
+
+    <div class="flow">
+      <div class="step">
+        <div class="rail"><div class="num">1</div><div class="line"></div></div>
+        <div class="card"><h3>Your browser</h3>
+          <p>You click a button. The page sends one request: "investigate this endpoint with the agent."</p>
+          <div class="where">service/static → POST /investigate {mode:"agent", scenario:"attack"}</div></div>
       </div>
-    </div>
-
-    <div class="step">
-      <div class="rail"><div class="num">3</div><div class="line"></div></div>
-      <div class="card">
-        <h3>The agent — Gemini 3.5, via Vertex AI</h3>
-        <p>The model reads your request and decides what to do. But it has no hands of its own: its entire power is four tools it can call. It cannot reach the evidence, the engine, or the seal directly — only through them.</p>
-        <div class="where">agent/purple_team_agent.py → Google ADK Agent</div>
-        <p class="note">This is the answer to "how does the agent have everything": it doesn't. It has four tools. The tools are the gateway.</p>
+      <div class="step">
+        <div class="rail"><div class="num">2</div><div class="line"></div></div>
+        <div class="card"><h3>The backend, on Google Cloud Run</h3>
+          <p>A small web service receives the request and sets up one investigation session, wired to this endpoint's telemetry. Then it hands the wheel to the agent.</p>
+          <div class="where">service/app.py → investigate() → PurpleTeamSession</div></div>
       </div>
-    </div>
+      <div class="step">
+        <div class="rail"><div class="num">3</div><div class="line"></div></div>
+        <div class="card"><h3>The agent — Gemini 3.5, via Vertex AI</h3>
+          <p>The model reads your request and decides what to do. But it has no hands of its own: its entire power is four tools it can call. It cannot reach the evidence, the engine, or the seal directly — only through them.</p>
+          <div class="where">agent/purple_team_agent.py → Google ADK Agent</div>
+          <p class="note">This is the answer to "how does the agent have everything": it doesn't. It has four tools. The tools are the gateway.</p></div>
+      </div>
 
-    <div class="step">
-      <div class="boundary">
-        <div class="t">↓ Trust boundary ↓</div>
+      <div class="step"><div class="boundary-card">
+        <div class="t">↓ trust boundary ↓</div>
         <p>Above this line the <b>model</b> is in charge — it chooses hunts and writes prose. Below it, everything is <b>deterministic</b>: no model, no floating-point, reproducible bit-for-bit. The model never crosses down.</p>
+      </div></div>
+
+      <div class="step core">
+        <div class="rail"><div class="num">4</div><div class="line"></div></div>
+        <div class="card"><h3>Tool · run_hunt — freeze the evidence</h3>
+          <p>Curated Velociraptor queries collect the endpoint's processes and connections. The result is frozen into an <b>immutable evidence window</b>, sealed with SHA-256. It returns a summary — not a verdict.</p>
+          <div class="where">agent/tools.py → tools/velociraptor/adapter.py → collect_window()</div>
+          <p class="note">The window's hash is computed with the same encoder the core uses everywhere — one source of truth for sealing.</p></div>
+      </div>
+      <div class="step core">
+        <div class="rail"><div class="num">5</div><div class="line"></div></div>
+        <div class="card"><h3>Tool · adjudicate — the engine decides</h3>
+          <p>The deterministic core scores the sealed window. Its cross-artifact engine (CAIE) notices the impossibility — a C2 beacon observed <i>before</i> its own process was created — and returns <span class="seal-word">MALICE</span>, mapped to MITRE T1070.006 and T1055.012. No model touched this number.</p>
+          <div class="where">vigia_scorer.py → _vigia_score() → tools/caie.py</div></div>
+      </div>
+      <div class="step core">
+        <div class="rail"><div class="num">6</div><div class="line"></div></div>
+        <div class="card"><h3>Seal it into the chain</h3>
+          <p>The verdict is sealed onto the previous one — each entry commits to the last. Alter any window, any verdict, or the order, and verification fails. Re-running the same windows reproduces every seal exactly.</p>
+          <div class="where">core/verdict_stream.py → build_stream_entry()</div></div>
+      </div>
+      <div class="step back">
+        <div class="rail"><div class="num">7</div></div>
+        <div class="card"><h3>Back up to you</h3>
+          <p>The sealed verdict returns to the agent, which now does the one thing it's for: it <b>narrates</b> the result in plain language — reporting the sealed facts exactly, never changing them. Your browser draws the exhibit: the seal, the timeline, the techniques, the custody chain.</p>
+          <div class="where">Gemini narration → service/app.py → the exhibit UI</div></div>
       </div>
     </div>
 
-    <div class="step core">
-      <div class="rail"><div class="num">4</div><div class="line"></div></div>
-      <div class="card">
-        <h3>Tool · run_hunt — freeze the evidence</h3>
-        <p>Curated Velociraptor queries collect the endpoint's processes and connections. The result is frozen into an <b>immutable evidence window</b>, sealed with SHA-256. It returns a summary — not a verdict.</p>
-        <div class="where">agent/tools.py → tools/velociraptor/adapter.py → collect_window()</div>
-        <p class="note">The window's hash is computed with the same encoder the core uses everywhere — one source of truth for sealing.</p>
+    <div class="tools">
+      <span class="eyebrow">Least privilege</span>
+      <h2>The agent's whole world: four tools</h2>
+      <p class="sub">Everything the investigator agent can do. Its safety is structural — none of these lets it invent or change a verdict.</p>
+      <div class="toolgrid">
+        <div class="tool"><code>list_available_hunts()</code><span>See the curated collections it may run. It cannot write its own query.</span></div>
+        <div class="tool"><code>run_hunt(hunts, reason)</code><span>Collect telemetry, freeze a sealed window. Returns a summary, no verdict.</span></div>
+        <div class="tool"><code>adjudicate(window_id)</code><span>Ask the deterministic core for the sealed verdict. It gets no way to pass a score or a hash.</span></div>
+        <div class="tool"><code>verify_chain()</code><span>Confirm the sealed record is intact.</span></div>
+      </div>
+      <p class="kicker">Swap Gemini for any other model and the wording changes — <b>the verdict never does</b>. That is the whole design.</p>
+    </div>
+
+    <div class="two">
+      <div class="agentbox">
+        <span class="tag">Investigator</span>
+        <h3>Drives the hunt (/exhibit)</h3>
+        <p>The agent above — chooses hunts, adjudicates, narrates the sealed result.</p>
+      </div>
+      <div class="agentbox mentor">
+        <span class="tag">Mentor</span>
+        <h3>Teaches juniors (/consult)</h3>
+        <p>A second ADK agent with read-only tools: explains MITRE, verdict states, and methodology. Same rule — it guides, never decides.</p>
       </div>
     </div>
 
-    <div class="step core">
-      <div class="rail"><div class="num">5</div><div class="line"></div></div>
-      <div class="card">
-        <h3>Tool · adjudicate — the engine decides</h3>
-        <p>The deterministic core scores the sealed window. Its cross-artifact engine (CAIE) notices the impossibility — a C2 beacon observed <i>before</i> its own process was created — and returns <span class="seal-word">MALICE</span>, mapped to MITRE T1070.006 and T1055.012. No model touched this number.</p>
-        <div class="where">vigia_scorer.py → _vigia_score() → tools/caie.py</div>
-      </div>
-    </div>
-
-    <div class="step core">
-      <div class="rail"><div class="num">6</div><div class="line"></div></div>
-      <div class="card">
-        <h3>Seal it into the chain</h3>
-        <p>The verdict is sealed onto the previous one — each entry commits to the last. Alter any window, any verdict, or the order, and verification fails. Re-running the same windows reproduces every seal exactly.</p>
-        <div class="where">core/verdict_stream.py → build_stream_entry()</div>
-      </div>
-    </div>
-
-    <div class="step back">
-      <div class="rail"><div class="num">7</div></div>
-      <div class="card">
-        <h3>Back up to you</h3>
-        <p>The sealed verdict returns to the agent, which now does the one thing it's for: it <b>narrates</b> the result in plain language — reporting the sealed facts exactly, never changing them. Your browser draws the exhibit: the seal, the timeline, the techniques, the custody chain.</p>
-        <div class="where">Gemini narration → service/app.py → the court-exhibit UI</div>
-      </div>
-    </div>
-
+    <p class="close">The shape to remember: <b>a request flows down through the agent, crosses the trust
+    boundary once, and the deterministic core does the deciding and the sealing.</b> The model
+    orchestrates the investigation and puts the result into words — it is never the thing that says
+    "this is malware." That sentence always comes from the sealed engine.</p>
   </div>
-
-  <div class="tools">
-    <h2>The agent's whole world: four tools</h2>
-    <p class="sub">Everything the investigator agent can do. Its safety is structural — none of these lets it invent or change a verdict.</p>
-    <div class="toolgrid">
-      <div class="tool"><code>list_available_hunts()</code><span>See the curated collections it may run. It cannot write its own query.</span></div>
-      <div class="tool"><code>run_hunt(hunts, reason)</code><span>Collect telemetry, freeze a sealed window. Returns a summary, no verdict.</span></div>
-      <div class="tool"><code>adjudicate(window_id)</code><span>Ask the deterministic core for the sealed verdict. It gets no way to pass a score or a hash.</span></div>
-      <div class="tool"><code>verify_chain()</code><span>Confirm the sealed record is intact.</span></div>
-    </div>
-    <p class="kicker">Swap Gemini for any other model and the wording changes — <b>the verdict never does</b>. That is the whole design.</p>
-  </div>
-
-  <div class="two">
-    <div class="agentbox">
-      <span class="tag">Investigator</span>
-      <h3>Drives the hunt (/exhibit)</h3>
-      <p>The agent above — chooses hunts, adjudicates, narrates the sealed result.</p>
-    </div>
-    <div class="agentbox mentor">
-      <span class="tag">Mentor</span>
-      <h3>Teaches juniors (/consult)</h3>
-      <p>A second ADK agent with read-only tools: explains MITRE, verdict states, and methodology. Same rule — it guides, never decides.</p>
-    </div>
-  </div>
-
-  <p class="close">The shape to remember: <b>a request flows down through the agent, crosses the trust boundary once, and the deterministic core does the deciding and the sealing.</b> The model orchestrates the investigation and puts the result into words — it is never the thing that says "this is malware." That sentence always comes from the sealed engine.</p>
-</div>
-
+<script src="/assets/nav.js"></script>
 </body>
 </html>
