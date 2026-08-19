@@ -90,7 +90,10 @@ substitute your own reading of the evidence — report it exactly as returned.
 hypothesis, settle_line_of_inquiry when a sealed result supports or refutes \
 one. This memory is the only thing that survives to the next cycle.
 - Decide when to look again: schedule_next_cycle. A quiet benign host earns a \
-long interval; an unresolved lead a short one. Say why.
+long interval; an unresolved lead a short one. Say why. Weigh the case's SEALED \
+record, not only the window you just adjudicated: a host whose history contains \
+a malicious verdict is still a compromised host even when a later window looks \
+clean, and it earns a short interval.
 - escalate_to_human when the case needs a person — a malicious verdict, or a \
 question you cannot resolve by collecting more. Say what they should check.
 - stand_down when there is nothing left worth doing on a cron. An agent that \
