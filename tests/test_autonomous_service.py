@@ -17,10 +17,31 @@ from fastapi.testclient import TestClient  # noqa: E402
 from service.app import app  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _fresh_rate_limit():
+    """The rate limiter is a per-process sliding window shared by every cycle
+    request, so a suite that runs more than a few of them throttles itself.
+    Cleared per test; the limiter's own behaviour is asserted separately."""
+    from service.app import _RATE_HITS
+    _RATE_HITS.clear()
+    yield
+
+
 @pytest.fixture()
 def client():
     with TestClient(app) as c:
         yield c
+
+
+def test_the_cycle_endpoint_is_rate_limited(client):
+    """An agentic cycle calls Gemini, so a public demo URL must not be a way to
+    burn the quota."""
+    from service.app import _RATE_HITS, _RATE_MAX
+    _new_case(client, "SVC-RATE")
+    codes = [client.post("/cases/SVC-RATE/cycle", json={}).status_code
+             for _ in range(_RATE_MAX + 2)]
+    assert 429 in codes, codes
+    _RATE_HITS.clear()
 
 
 def _new_case(client, case_id, scenario="attack"):
@@ -132,3 +153,33 @@ def test_health_reports_the_fleets_unattended_work(client):
 def test_a_cycle_on_a_missing_case_is_a_404(client):
     assert client.post("/cases/NOPE/cycle", json={}).status_code == 404
     assert client.get("/cases/NOPE/mission").status_code == 404
+
+
+def test_a_human_can_take_up_an_escalation_over_http(client):
+    """The other half of escalation: it stops being shown because somebody
+    handled it, never because something newer arrived."""
+    _new_case(client, "SVC-ACK")
+    client.post("/cases/SVC-ACK/cycle", json={})
+    mission = client.get("/cases/SVC-ACK/mission").json()
+    assert mission["escalations"], "the cycle raised nothing to acknowledge"
+    assert "MALICE" in mission["escalation"]["why"]
+
+    r = client.post("/cases/SVC-ACK/escalations/0/acknowledge",
+                    json={"note": "host isolated, ticket INC-4412",
+                          "examiner_id": "perito-01"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["acknowledged"]["acknowledged_by"] == "perito-01"
+
+    after = client.get("/cases/SVC-ACK/mission").json()
+    assert after["escalations"][0]["acknowledged"] is True
+    assert after["verification"]["memory_ok"]
+
+
+def test_acknowledging_an_escalation_that_does_not_exist_is_a_404(client):
+    _new_case(client, "SVC-ACK2")
+    client.post("/cases/SVC-ACK2/cycle", json={})
+    assert client.post("/cases/SVC-ACK2/escalations/9/acknowledge",
+                       json={"note": "n", "examiner_id": "p"}).status_code == 404
+    assert client.post("/cases/NOPE/escalations/0/acknowledge",
+                       json={"note": "n", "examiner_id": "p"}).status_code == 404

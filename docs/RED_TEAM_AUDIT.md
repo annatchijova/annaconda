@@ -367,3 +367,123 @@ beside the prose for a human to compare.
 - `verdicts` and `audit_trail` carry no per-entry identity, so divergence
   between two writers cannot be detected for them — only the two hash chains
   are protected. Giving them an identity would close the gap.
+
+---
+
+# Red Team Round 5 — identity, growth, and what a human actually sees
+
+**Method:** Abductive Engineering (A–D–I) + Red-Team Auditing.
+**Base:** `claude/agentic-autonomous-project-d9y5u0` @ `cda8881`, audited before
+the fixes in this round.
+**Runtime:** Python 3.11.15, `google-auth` 2.56.3.
+**Scope:** what Round 4 did not reach — the identity check itself, growth in the
+parts left unsegmented, and whether an escalation survives to be read.
+
+Round 4 was about the record being destroyed or corrupted. This round is about
+the record being *correct and unread*: a token that authenticates the wrong
+person, a document that fills up anyway, and an escalation that stops being
+shown without anybody handling it.
+
+## Executive summary
+| ID | Severity | Level | Bucket | Finding |
+|----|----------|-------|--------|---------|
+| RT-11 | **High** | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | The identity token's audience was not verified: a correctly signed token minted for a completely different service authenticated. |
+| RT-12 | Medium | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | Only the journal was segmented out of the mission; the working summary grew unbounded, filling a document in ~145 days at hourly cadence. |
+| RT-13 | Medium | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | An unacknowledged escalation for a sealed `MALICE_HIGH` was silently replaced by a later routine one — nobody handled it, it stopped being shown. |
+| — | — | **DEFENDED** | — | Bit-for-bit sealing survives the autonomous path: two runs produce identical `entry_hash` and score. |
+
+---
+
+## RT-11 — A token for another service authenticated
+
+**Severity:** High **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+- **Surprise:** `agent/principal.py` states its own rule — "a token we could not
+  verify is treated exactly like no token at all" — and then passes
+  `audience=None` when `VIGIA_EXPECTED_AUDIENCE` is unset, which is the default.
+- **CODE FACT (google-auth 2.56.3):** `jwt.decode` checks the `aud` claim only
+  `if audience is not None`. Supplying `None` does not mean "any audience is
+  acceptable" by policy; it means the claim is never looked at.
+- **Deduction:** a correctly signed token whose `aud` names an unrelated service
+  verifies when no audience is configured, and is rejected when one is.
+- **Induction:** signed a Google-format ID token with a locally generated RSA
+  key and injected its certificate, so the signature genuinely verifies and only
+  the audience is in question. `aud =
+  https://some-unrelated-service.example.com`. Observed: **audience unset →
+  accepted**, `email: analyst@example.com`; audience set → `Token has wrong
+  audience …`. Prediction holds.
+- **Causal chain:** any service the analyst signs into can obtain an ID token
+  for its own audience → presented to annaconda → signature valid, audience
+  never checked → if the subject is in the roster, the request runs as that
+  analyst, with that department's catalog privileges. Classic confused deputy.
+- **Bounded by:** the roster. An identity annaconda has not rostered still gets
+  nothing (Round 4's design). So the reachable case is a *rostered* analyst's
+  token leaking through an unrelated service, not an arbitrary Google account.
+- **Fix:** no configured audience means the token cannot be fully verified, so
+  it does not authenticate — the module's own rule, now applied. The service
+  keeps working; the principal is `asserted`, as it already is with no token at
+  all. `DEPLOY.md` already sets `VIGIA_EXPECTED_AUDIENCE`.
+  `tests/test_principal.py::test_a_token_cannot_authenticate_without_a_configured_audience`
+
+## RT-12 — Segmenting the chains postponed the ceiling 13×, it did not remove it
+
+**Severity:** Medium **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+- **Surprise:** Round 4 segmented the two hash chains and the docs then read as
+  though the 1 MiB problem was handled. But `hypotheses`, `tried_hunts` and
+  `open_questions` live inside the mission, which stays in the case document.
+- **Deduction:** each grows at least once per cycle, so the document still grows
+  without bound — more slowly, which is worse for being less visible.
+- **Induction:** 400 cycles against the size-limited double. Observed **~301
+  bytes/cycle** in the unsegmented part → 1 MiB at ~3,482 cycles = **145 days**
+  at hourly cadence (against 11 days before segmentation).
+- **Fix:** those lists are a *working summary* of the journal — every entry was
+  written to the journal first, and the journal is segmented and authoritative.
+  Each list is capped, giving up settled entries before open ones and oldest
+  before newest, and what was dropped is counted and reported in the brief
+  (`older_entries_in_sealed_journal`) so no reader mistakes the view for the
+  record. Re-measured: **~2 bytes/cycle**, flat at ~31 KB.
+  `tests/test_mission.py::test_the_working_summary_is_bounded_and_says_what_it_dropped`
+- **First fix attempt, corrected:** capping only *settled* entries left open
+  hypotheses unbounded — an agent that opens a line every cycle and never
+  settles one still filled the document (measured: still 144 bytes/cycle). The
+  rule became "cap everything, give up settled first", which is bounded under
+  every agent behaviour rather than under well-behaved ones.
+
+## RT-13 — An escalation stopped being shown without being handled
+
+**Severity:** Medium **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+- **Surprise:** `mission["escalation"]` is a single slot, assigned on every
+  `escalate()`.
+- **Deduction:** a case escalated for a sealed `MALICE_HIGH`, then escalated
+  again by a later cycle for something routine, shows only the later one on
+  `/cases/{id}/mission` and on the console — which is where a human looks.
+- **Induction:** observed exactly that; the malicious escalation survived only
+  in the journal, and its `acknowledged` flag was never set. It was replaced,
+  not handled.
+- **Fix:** escalations accumulate in a bounded list. `mission["escalation"]` is
+  now *derived* — the most severe unacknowledged one, ranked from its **sealed
+  basis** only (an adjudicated malicious verdict outranks anything else; the
+  agent's prose has no bearing on it). `POST
+  /cases/{id}/escalations/{i}/acknowledge` closes the loop: an escalation stops
+  being shown because a named examiner took it up and said what they did,
+  recorded into the sealed journal — never because something newer arrived.
+  `tests/test_mission.py::test_a_later_escalation_cannot_displace_an_unacknowledged_severe_one`
+
+## Defended vectors
+
+| Vector | Result | Evidence |
+|---|---|---|
+| The autonomous path breaks bit-for-bit sealing | **DEFENDED** | Two independent runs over the same evidence: identical `MALICE_HIGH`, `5569/10000`, `98224dab…`. Mission journal hashes differ (they seal a wall clock) and are not part of any verdict. |
+| A verified identity can run as a department it does not hold | **DEFENDED** | The roster's department wins over the request's claim (Round 4). |
+| Bounding the summary loses history | **DEFENDED** | Every trimmed entry remains in the segmented journal, and the brief reports the counts rather than presenting a truncated view as complete. |
+
+## Recommendations (record only)
+
+- `_rate_ok("cycle")` is one global bucket for every case and caller, not
+  per-principal. It stops a hammer; it is not a quota system, and one busy
+  operator can throttle another.
+- The escalation ranking is coarse by design (malicious / other-sealed /
+  unsealed). If escalation reasons multiply it will need a real severity field
+  rather than an inference from the basis.

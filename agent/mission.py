@@ -54,6 +54,24 @@ _TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
 # not invent a state (a typo'd status is refused, not silently stored).
 HYPOTHESIS_STATES = frozenset({"open", "supported", "refuted"})
 
+# The mission's lists are a working summary; the journal is the record. Every
+# entry in these lists was written to the journal first, and the journal is
+# stored in bounded segments, so trimming the summary loses nothing that cannot
+# be read back from the sealed history.
+#
+# Without a bound the summary alone grows ~300 bytes a cycle, which fills a
+# Firestore document in about 145 days at hourly cadence — the chain
+# segmentation moved that ceiling from eleven days, it did not remove it.
+#
+# Each list is capped absolutely, dropping SETTLED entries before open ones and
+# oldest before newest — a closed line of inquiry is history, an open one is
+# work — and what was dropped is counted so no reader mistakes the working view
+# for the whole record.
+HYPOTHESIS_LIMIT = 100
+QUESTION_LIMIT = 50
+TRIED_HUNTS_LIMIT = 100
+ESCALATION_LIMIT = 50
+
 
 class MissionError(ValueError):
     """Invalid input reached the mission-memory boundary."""
@@ -68,6 +86,38 @@ def _seal(obj) -> str:
     serialized = json.dumps(
         _canonicalize(obj), sort_keys=True, ensure_ascii=True).encode("utf-8")
     return hashlib.sha256(serialized).hexdigest()
+
+
+def _trim(mission: dict) -> None:
+    """Bound the working summary. Counts of what was trimmed are kept so the
+    brief can say the history is longer than the summary shows, rather than
+    presenting a truncated view as the whole of it."""
+    dropped = mission.setdefault("summarized_away",
+                                 {"hypotheses": 0, "open_questions": 0,
+                                  "tried_hunts": 0, "escalations": 0})
+    dropped.setdefault("escalations", 0)
+    mission.setdefault("escalations", [])
+
+    def cap(items: list, limit: int, is_settled) -> list:
+        """Keep the newest ``limit`` entries, giving up settled ones first."""
+        excess = len(items) - limit
+        if excess <= 0:
+            return items
+        # Oldest settled entries go first; only then oldest open ones.
+        order = sorted(range(len(items)),
+                       key=lambda i: (0 if is_settled(items[i]) else 1, i))
+        drop = set(order[:excess])
+        return [item for i, item in enumerate(items) if i not in drop]
+
+    for key, limit, settled in (
+        ("hypotheses", HYPOTHESIS_LIMIT, lambda h: h.get("status") != "open"),
+        ("open_questions", QUESTION_LIMIT, lambda q: bool(q.get("resolved"))),
+        ("tried_hunts", TRIED_HUNTS_LIMIT, lambda t: True),
+        ("escalations", ESCALATION_LIMIT, lambda e: bool(e.get("acknowledged"))),
+    ):
+        before = len(mission[key])
+        mission[key] = cap(mission[key], limit, settled)
+        dropped[key] += before - len(mission[key])
 
 
 def _text(value, field: str, *, limit: int = 2000) -> str:
@@ -93,6 +143,7 @@ def new_mission(case_id: str) -> dict:
         "tried_hunts": [],
         "open_questions": [],
         "next_action": None,
+        "escalations": [],
         "escalation": None,
         "standing_down": None,
         "journal": [],
@@ -217,6 +268,7 @@ def add_hypothesis(mission: dict, *, actor: str, text: str) -> dict:
     }
     mission["hypotheses"].append(hypothesis)
     record(mission, actor=actor, action="add_hypothesis", detail=dict(hypothesis))
+    _trim(mission)
     return hypothesis
 
 
@@ -235,6 +287,7 @@ def update_hypothesis(mission: dict, *, actor: str, hypothesis_id: str,
             h["updated_cycle"] = mission.get("cycles", 0)
             record(mission, actor=actor, action="update_hypothesis",
                    detail=dict(h))
+            _trim(mission)
             return h
     raise MissionError(f"unknown hypothesis {hypothesis_id!r}")
 
@@ -254,6 +307,7 @@ def record_collection(mission: dict, *, actor: str, hunts: list, reason: str,
     }
     mission["tried_hunts"].append(tried)
     record(mission, actor=actor, action="record_collection", detail=dict(tried))
+    _trim(mission)
     return tried
 
 
@@ -276,6 +330,7 @@ def note_open_question(mission: dict, *, actor: str, question: str,
     }
     mission["open_questions"].append(entry)
     record(mission, actor=actor, action="note_open_question", detail=dict(entry))
+    _trim(mission)
     return entry
 
 
@@ -353,6 +408,36 @@ def unsealed_verdict_claims(text: str, sealed_states) -> list:
     return sorted({t for t in named if t not in sealed})
 
 
+def _escalation_rank(entry: dict) -> int:
+    """How loudly an escalation needs to be heard, from its SEALED basis only.
+
+    Deliberately coarse: one that rests on an adjudicated malicious verdict
+    outranks one that rests on anything else, which outranks one that rests on
+    nothing. The agent's prose has no bearing on it.
+    """
+    states = [str(b.get("verdict_state", ""))
+              for b in (entry.get("sealed_basis") or [])]
+    if any(st.startswith("MALICE") for st in states):
+        return 3
+    if any(st == "ESCALATE" for st in states):
+        return 2
+    return 1 if states else 0
+
+
+def _current_escalation(mission: dict) -> Optional[dict]:
+    """What a human should be shown: the most severe escalation nobody has
+    acknowledged yet, most recent breaking ties. Only when every escalation has
+    been acknowledged does the latest stand as the current view."""
+    entries = mission.get("escalations") or []
+    if not entries:
+        return None
+    open_ones = [(i, e) for i, e in enumerate(entries)
+                 if not e.get("acknowledged")]
+    if not open_ones:
+        return entries[-1]
+    return max(open_ones, key=lambda pair: (_escalation_rank(pair[1]), pair[0]))[1]
+
+
 def escalate(mission: dict, *, actor: str, why: str, what_to_check: str,
              sealed_basis=()) -> dict:
     """Hand the case to a human, with the reasoning that made it necessary.
@@ -367,6 +452,12 @@ def escalate(mission: dict, *, actor: str, why: str, what_to_check: str,
     the case that produced this parameter: a cycle whose collection failed,
     whose adjudication never ran, and whose commander escalated anyway,
     citing a verdict that was never reached.
+
+    Escalations accumulate rather than replacing one another. A single slot
+    meant a later routine escalation could displace an unacknowledged one for a
+    sealed malicious verdict: nobody handled it, it simply stopped being shown
+    where a human looks. ``mission["escalation"]`` is now derived — the most
+    severe unacknowledged one — and the full list is kept.
     """
     basis = [
         {"verdict_state": str(v.get("verdict_state", "")),
@@ -388,9 +479,39 @@ def escalate(mission: dict, *, actor: str, why: str, what_to_check: str,
         "unsealed_verdict_claims": unsealed_verdict_claims(
             f"{why} {what_to_check}", sealed_states),
     }
-    mission["escalation"] = entry
+
+    entries = mission.setdefault("escalations", [])
+    # A mission written before escalations were a list carries only the slot;
+    # bring it in so its history is not lost by this change.
+    previous = mission.get("escalation")
+    if isinstance(previous, dict) and previous not in entries:
+        entries.append(previous)
+    entries.append(entry)
+    mission["escalation"] = _current_escalation(mission)
     record(mission, actor=actor, action="escalate_to_human", detail=dict(entry))
+    _trim(mission)
     return entry
+
+
+def acknowledge_escalation(mission: dict, *, actor: str, index: int,
+                           note: str) -> dict:
+    """Mark one escalation as taken up by a human, with who and what they said.
+
+    The point of acknowledging is that the *next* unacknowledged one becomes
+    what the case shows — an escalation stops being displayed because somebody
+    handled it, never because something newer arrived.
+    """
+    entries = mission.get("escalations") or []
+    if not 0 <= index < len(entries):
+        raise MissionError(f"no escalation at index {index}")
+    entries[index]["acknowledged"] = True
+    entries[index]["acknowledged_by"] = _text(actor, "actor", limit=120)
+    entries[index]["acknowledged_note"] = _text(note, "note")
+    entries[index]["acknowledged_utc"] = _now()
+    mission["escalation"] = _current_escalation(mission)
+    record(mission, actor=actor, action="acknowledge_escalation",
+           detail={"index": index, "note": entries[index]["acknowledged_note"]})
+    return entries[index]
 
 
 def stand_down(mission: dict, *, actor: str, rationale: str) -> dict:
@@ -491,6 +612,12 @@ def brief(mission: dict, *, case: Optional[dict] = None) -> dict:
         "standing_down": mission.get("standing_down") is not None,
         "memory_head": mission.get("memory_head", GENESIS_HASH),
     }
+    # Say when the summary is shorter than the history, so a reader (or an
+    # agent) never mistakes the working view for the whole record.
+    away = mission.get("summarized_away") or {}
+    if any(away.values()):
+        out["older_entries_in_sealed_journal"] = {
+            k: v for k, v in away.items() if v}
     if case is not None:
         # Sealed facts, straight from the adjudicated record.
         out["sealed_status"] = case.get("status")

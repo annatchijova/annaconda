@@ -185,3 +185,82 @@ def test_the_brief_reads_verdict_facts_from_the_sealed_case_not_memory():
     assert out["sealed_status"] == "malice"
     assert out["sealed_worst_verdict"] == "MALICE_HIGH"
     assert out["sealed_verdicts"] == 2
+
+
+def _sealed(state="MALICE_HIGH"):
+    return [{"verdict_state": state, "entry_hash": "a" * 64, "sequence": 0}]
+
+
+def test_a_later_escalation_cannot_displace_an_unacknowledged_severe_one():
+    """A single slot meant a routine escalation could replace one for a sealed
+    malicious verdict. Nobody handled it; it just stopped being shown where a
+    human looks."""
+    m = mem.new_mission("ESC")
+    mem.escalate(m, actor="engine", why="the engine adjudicated MALICE_HIGH",
+                 what_to_check="confirm containment", sealed_basis=_sealed())
+    mem.escalate(m, actor="fleet-commander",
+                 why="a scheduled task could not be classified",
+                 what_to_check="review the task", sealed_basis=[])
+    assert "MALICE_HIGH" in m["escalation"]["why"]
+    assert len(m["escalations"]) == 2
+
+
+def test_an_escalation_stops_showing_when_somebody_handles_it():
+    m = mem.new_mission("ESC")
+    mem.escalate(m, actor="engine", why="the engine adjudicated MALICE_HIGH",
+                 what_to_check="confirm containment", sealed_basis=_sealed())
+    mem.escalate(m, actor="fleet-commander", why="a routine question",
+                 what_to_check="review it", sealed_basis=[])
+    mem.acknowledge_escalation(m, actor="perito-01", index=0,
+                               note="host isolated, ticket INC-4412")
+    assert "routine" in m["escalation"]["why"]
+    assert m["escalations"][0]["acknowledged_by"] == "perito-01"
+    assert mem.verify_mission(m)["memory_ok"]
+
+
+def test_acknowledging_an_escalation_that_is_not_there_is_refused():
+    m = mem.new_mission("ESC")
+    with pytest.raises(mem.MissionError):
+        mem.acknowledge_escalation(m, actor="p", index=3, note="n")
+
+
+def test_a_mission_written_before_escalations_were_a_list_keeps_its_history():
+    """Additive schema change: an older mission carries only the slot."""
+    m = mem.new_mission("OLD")
+    m.pop("escalations")
+    m["escalation"] = {"why": "an earlier escalation", "what_to_check": "x",
+                       "acknowledged": False, "sealed_basis": _sealed()}
+    mem.escalate(m, actor="fleet-commander", why="something new",
+                 what_to_check="y", sealed_basis=[])
+    whys = [e["why"] for e in m["escalations"]]
+    assert "an earlier escalation" in whys and "something new" in whys
+    assert m["escalation"]["why"] == "an earlier escalation"
+
+
+def test_the_working_summary_is_bounded_and_says_what_it_dropped():
+    """The mission's lists are a view of the journal, which is segmented and
+    authoritative. Unbounded they fill a Firestore document on their own."""
+    m = mem.new_mission("BOUND")
+    for i in range(mem.TRIED_HUNTS_LIMIT + 40):
+        mem.record_collection(m, actor="windows-hunter", hunts=["pslist"],
+                              reason=f"cycle {i}")
+    assert len(m["tried_hunts"]) == mem.TRIED_HUNTS_LIMIT
+    assert m["summarized_away"]["tried_hunts"] == 40
+    assert mem.brief(m)["older_entries_in_sealed_journal"]["tried_hunts"] == 40
+    # nothing was lost: every one of them is in the sealed journal
+    recorded = [e for e in m["journal"] if e["action"] == "record_collection"]
+    assert len(recorded) == mem.TRIED_HUNTS_LIMIT + 40
+    assert mem.verify_mission(m)["memory_ok"]
+
+
+def test_settled_lines_of_inquiry_are_given_up_before_open_ones():
+    m = mem.new_mission("BOUND2")
+    for i in range(mem.HYPOTHESIS_LIMIT):
+        h = mem.add_hypothesis(m, actor="a", text=f"settled {i}")
+        mem.update_hypothesis(m, actor="a", hypothesis_id=h["id"],
+                              status="refuted", rationale="no")
+    for i in range(10):
+        mem.add_hypothesis(m, actor="a", text=f"open {i}")
+    kept = m["hypotheses"]
+    assert len(kept) == mem.HYPOTHESIS_LIMIT
+    assert sum(1 for h in kept if h["status"] == "open") == 10

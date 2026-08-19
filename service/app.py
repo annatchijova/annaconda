@@ -806,10 +806,44 @@ def case_mission(case_id: str) -> dict:
             "open_questions": mission.get("open_questions", []),
             "tried_hunts": mission.get("tried_hunts", []),
             "next_action": mission.get("next_action"),
+            # The current one is the most severe nobody has acknowledged; the
+            # full list is here so a later routine escalation can never be
+            # mistaken for the only one raised.
             "escalation": mission.get("escalation"),
+            "escalations": mission.get("escalations", []),
             "standing_down": mission.get("standing_down"),
             "journal": mission.get("journal", []),
             "verification": mem.verify_mission(mission)}
+
+
+class AcknowledgeRequest(BaseModel):
+    note: str = Field(..., min_length=1, max_length=2000)
+    examiner_id: str = Field(..., min_length=1, max_length=128)
+
+
+@app.post("/cases/{case_id}/escalations/{index}/acknowledge")
+def acknowledge_escalation(case_id: str, index: int,
+                           req: AcknowledgeRequest) -> dict:
+    """A human takes up one escalation, saying what they did.
+
+    This is the other half of escalation: an escalation stops being shown
+    because somebody handled it, never because something newer arrived. When
+    this one is acknowledged the next unacknowledged one surfaces.
+    """
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    mission = mem.attach(case)
+    try:
+        entry = mem.acknowledge_escalation(mission, actor=req.examiner_id,
+                                           index=index, note=req.note)
+    except mem.MissionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        _CASE_STORE.save_mission(case_id, mission)
+    except ConcurrentModificationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"acknowledged": entry, "now_showing": mission.get("escalation")}
 
 
 @app.post("/demo/seed")

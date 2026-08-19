@@ -23,6 +23,13 @@ def client():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_rate_limit():
+    from service.app import _RATE_HITS
+    _RATE_HITS.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
     monkeypatch.delenv(pr.REQUIRE_AUTH_ENV, raising=False)
     monkeypatch.delenv(pr.ROSTER_ENV, raising=False)
@@ -117,3 +124,40 @@ def test_health_reports_the_posture(client, monkeypatch):
     assert client.get("/health").json()["requires_authenticated_principal"] is False
     monkeypatch.setenv(pr.REQUIRE_AUTH_ENV, "true")
     assert client.get("/health").json()["requires_authenticated_principal"] is True
+
+
+def test_a_token_cannot_authenticate_without_a_configured_audience(monkeypatch):
+    """google-auth checks 'aud' only when an audience is supplied. With none
+    configured, a correctly signed token minted for a completely different
+    service verifies — the confused-deputy case. An unverifiable token is
+    treated as no token, per this module's own rule."""
+    monkeypatch.delenv(pr.AUDIENCE_ENV, raising=False)
+    called = []
+    monkeypatch.setattr(
+        "google.oauth2.id_token.verify_oauth2_token",
+        lambda *a, **k: called.append(a) or {"email": "analyst@example.com"})
+    assert pr.verify_identity_token("a.real.token") is None
+    assert not called, "the token was verified without an audience check"
+
+
+def test_a_configured_audience_is_passed_to_the_verifier(monkeypatch):
+    monkeypatch.setenv(pr.AUDIENCE_ENV, "https://vigia-live.example.com")
+    seen = {}
+
+    def _verify(token, request, audience):
+        seen["audience"] = audience
+        return {"email": "analyst@example.com", "email_verified": True}
+
+    monkeypatch.setattr("google.oauth2.id_token.verify_oauth2_token", _verify)
+    assert pr.verify_identity_token("a.real.token") == "analyst@example.com"
+    assert seen["audience"] == "https://vigia-live.example.com"
+
+
+def test_an_unconfigured_audience_leaves_the_principal_asserted(monkeypatch):
+    """End to end: the request still works, it is just not authenticated."""
+    monkeypatch.delenv(pr.AUDIENCE_ENV, raising=False)
+    monkeypatch.setenv(pr.ROSTER_ENV, "analyst@example.com:soc")
+    p = pr.resolve(authorization_header="Bearer some.token",
+                   claimed_department="forensics")
+    assert p["authenticated"] is False
+    assert p["department"] == "forensics"

@@ -80,6 +80,10 @@
   .mono{font-family:var(--mono);font-size:.76rem;}
   .ok{color:var(--sealed);font-weight:700;} .bad{color:var(--seal);font-weight:700;}
   .empty{color:var(--ink-faint);font-style:italic;}
+  .escal{border-left:3px solid var(--hairline);padding:.4rem 0 .5rem .7rem;margin:.35rem 0;}
+  .escal.current{border-left-color:var(--seal);}
+  .escal.done{opacity:.62;border-left-color:var(--sealed);}
+  .escal button.ack{margin-top:.35rem;padding:.35rem .7rem;font-size:.6rem;}
   .err{background:#fdf0ee;border:1px solid var(--seal);color:var(--seal-deep);border-radius:4px;padding:.7rem .9rem;font-size:.85rem;margin:.8rem 0 0;}
 </style>
 </head>
@@ -249,6 +253,23 @@ function renderCycle(body){
     <div style="margin-top:1rem">${steps}</div>`;
 }
 
+function renderEscalation(e, i, m){
+  const current = m.escalation &&
+    m.escalation.raised_utc === e.raised_utc && m.escalation.why === e.why;
+  const basis = (e.sealed_basis || []).length
+    ? `<div class="dt">resting on ${e.sealed_basis.map(b =>
+        `<span class="mono">${esc(b.verdict_state)}</span> <span class="mono">${esc((b.entry_hash||"").slice(0,12))}…</span>`).join(", ")}</div>`
+    : `<div><span class="flag">⚠ rests on no sealed verdict</span></div>`;
+  const invented = (e.unsealed_verdict_claims || []).length
+    ? `<div><span class="flag">⚠ names ${e.unsealed_verdict_claims.map(esc).join(", ")}, never sealed</span></div>` : "";
+  const state = e.acknowledged
+    ? `<div class="dt">taken up by <span class="mono">${esc(e.acknowledged_by)}</span> — ${esc(e.acknowledged_note)}</div>`
+    : `<div><button class="ghost ack" data-index="${i}">Take this up</button></div>`;
+  return `<div class="escal${current ? " current" : ""}${e.acknowledged ? " done" : ""}">
+    <b>${esc(e.why)}</b> <span class="dt">— check: ${esc(e.what_to_check)}</span>
+    ${basis}${invented}${state}</div>`;
+}
+
 function renderMission(m){
   const hyp = m.hypotheses.length
     ? m.hypotheses.map(h => `<div><span class="tag">${esc(h.id)}</span> ${esc(h.text)} — <b>${esc(h.status)}</b>${
@@ -272,14 +293,8 @@ function renderMission(m){
         ? `<span class="mono">${esc(m.next_action.due_utc)}</span> — ${esc(m.next_action.action)} <span class="dt">(${esc(m.next_action.why)})</span>`
         : (m.standing_down ? `<b>stood down</b> <span class="dt">— ${esc(m.standing_down.rationale)}</span>`
                            : `<span class="empty">not scheduled</span>`)}</dd>
-      <dt>Escalation</dt><dd>${m.escalation
-        ? `<b>${esc(m.escalation.why)}</b> <span class="dt">— check: ${esc(m.escalation.what_to_check)}</span>` +
-          (m.escalation.sealed_basis && m.escalation.sealed_basis.length
-            ? `<div class="dt">resting on ${m.escalation.sealed_basis.map(b =>
-                `<span class="mono">${esc(b.verdict_state)}</span> <span class="mono">${esc((b.entry_hash||"").slice(0,12))}…</span>`).join(", ")}</div>`
-            : `<div><span class="flag">⚠ rests on no sealed verdict</span></div>`) +
-          ((m.escalation.unsealed_verdict_claims || []).length
-            ? `<div><span class="flag">⚠ names ${m.escalation.unsealed_verdict_claims.map(esc).join(", ")}, never sealed</span></div>` : "")
+      <dt>Escalations</dt><dd>${(m.escalations || []).length
+        ? m.escalations.map((e, i) => renderEscalation(e, i, m)).join("")
         : `<span class="empty">none raised</span>`}</dd>
     </dl>`;
 }
@@ -344,6 +359,20 @@ $("run").addEventListener("click", async () => {
     await loadCases();
   } catch(e){ showErr(e); }
   finally { $("run").disabled = false; }
+});
+
+document.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button.ack");
+  if(!btn) return;
+  const caseId = $("case-id").value;
+  const note = prompt("What did you do? (recorded on the case)");
+  if(!note) return;
+  btn.disabled = true;
+  try {
+    await jpost(`/cases/${encodeURIComponent(caseId)}/escalations/${btn.dataset.index}/acknowledge`,
+                {note, examiner_id: "perito-01"});
+    renderMission(await jget(`/cases/${encodeURIComponent(caseId)}/mission`));
+  } catch(e){ showErr(e); btn.disabled = false; }
 });
 
 function showErr(e){

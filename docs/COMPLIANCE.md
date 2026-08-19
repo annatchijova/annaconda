@@ -179,6 +179,13 @@ but it is not done here and should not be claimed.
   and is written up as RT-07 and RT-09 in
   [RED_TEAM_AUDIT.md](RED_TEAM_AUDIT.md).
 
+- **An escalation is closed by a person, not by time.** Escalations accumulate;
+  the one a case shows is the most severe nobody has acknowledged, ranked from
+  its sealed basis. `POST /cases/{id}/escalations/{i}/acknowledge` records who
+  took it up and what they did, into the sealed journal. Before this, a later
+  routine escalation displaced an unacknowledged one for a sealed malicious
+  verdict (RT-13).
+
 - **The fleet cannot abandon a compromised host.** Standing a case down, or
   scheduling it more than two hours out, is refused when the *sealed* record
   says the host is malicious — read from the case's worst verdict and what the
@@ -198,6 +205,13 @@ but it is not done here and should not be claimed.
   `authenticated: false`, and how it was resolved — is sealed into the case's
   mission journal, so a record answers "who ran this cycle, and was that
   verified" months later.
+
+  A token only authenticates when `VIGIA_EXPECTED_AUDIENCE` names this service.
+  Without it google-auth does not check the `aud` claim at all, so a correctly
+  signed token minted for an unrelated service would verify — the confused
+  deputy this check exists to stop (RT-11 in
+  [RED_TEAM_AUDIT.md](RED_TEAM_AUDIT.md), confirmed against a signed token
+  carrying a foreign audience). An unverifiable token is treated as no token.
 
   The deployed demo runs `--allow-unauthenticated` and therefore asserts. That
   is a posture, not a gap in the mechanism: set

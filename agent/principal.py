@@ -39,6 +39,7 @@ log = logging.getLogger("annaconda.principal")
 
 REQUIRE_AUTH_ENV = "VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL"
 ROSTER_ENV = "VIGIA_DEPARTMENT_ROSTER"
+AUDIENCE_ENV = "VIGIA_EXPECTED_AUDIENCE"
 
 
 class UnauthenticatedPrincipalError(PermissionError):
@@ -82,11 +83,27 @@ def verify_identity_token(token: str) -> Optional[str]:
     """
     if not token:
         return None
+
+    # Without an expected audience there is no audience check at all: google-auth
+    # verifies 'aud' only when one is supplied, so a correctly signed token
+    # minted for a COMPLETELY DIFFERENT service would verify here and, if its
+    # subject happens to be rostered, authenticate as that person. That is the
+    # confused-deputy case audience verification exists to prevent. A token we
+    # cannot fully check is treated exactly like no token at all — the rule this
+    # module already states — so an unconfigured audience means unauthenticated,
+    # not "authenticated without that check".
+    audience = os.environ.get("VIGIA_EXPECTED_AUDIENCE", "").strip()
+    if not audience:
+        log.warning(
+            "%s is not set, so an identity token's audience cannot be verified "
+            "— refusing to treat the principal as authenticated. Set it to this "
+            "service's URL to accept identity tokens.", AUDIENCE_ENV)
+        return None
+
     try:
         from google.auth.transport import requests as google_requests
         from google.oauth2 import id_token as google_id_token
 
-        audience = os.environ.get("VIGIA_EXPECTED_AUDIENCE") or None
         claims = google_id_token.verify_oauth2_token(
             token, google_requests.Request(), audience)
     except Exception as exc:  # noqa: BLE001 — any failure is a failure to verify

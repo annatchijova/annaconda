@@ -120,8 +120,11 @@ VIGIA_DEPARTMENT_ROSTER="analyst@example.com:soc,ir-lead@example.com:incident-re
 VIGIA_EXPECTED_AUDIENCE="$URL"
 ```
 
-An asserted principal is then refused with 403. A verified identity wins over
-whatever the request body claims, so a SOC token cannot run as forensics. Give
+`VIGIA_EXPECTED_AUDIENCE` is **required** for a token to authenticate at all:
+without it the `aud` claim is not checked, so a token minted for another service
+would verify. An asserted principal is then refused with 403. A verified
+identity wins over whatever the request body claims, so a SOC token cannot run
+as forensics. Give
 the Pub/Sub push subscription an OIDC token (`--push-auth-service-account`) and
 roster that service account, so the cron runs authenticated too. `/health`
 reports `requires_authenticated_principal`.
