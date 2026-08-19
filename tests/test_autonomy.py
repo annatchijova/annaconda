@@ -203,3 +203,43 @@ def test_an_abstain_question_reaches_the_fleets_memory():
     # and a later definitive run closes it in memory too
     store.apply_run("AB-1", [], [{"verdict_state": "BENIGN_HIGH"}], [])
     assert not mem.brief(case["mission"])["unresolved_questions"]
+
+
+def test_a_case_with_malice_in_its_history_is_never_scheduled_as_quiet():
+    """A later window that happens to look clean must not downgrade the case.
+
+    Cycle 1 seals MALICE on the running-state window. Cycle 2 collects the
+    persistence surface, which on this host adjudicates to nothing alarming —
+    and the planner, reading only that window, scheduled the 24-hour
+    "quiet host earns a long interval". The case's sealed record still said
+    MALICE. This is the same failure the case store already guards against
+    (never downgrade a case whose history is worse), reappearing in the
+    planner.
+    """
+    case = _case("AUTO-HIST")
+    session = _session(ATTACK, "AUTO-HIST")
+    first = _cycle(session, case)
+    assert first["verdicts"][0]["verdict_state"].startswith("MALICE")
+
+    # the case store's view of the case, as the service would have it
+    case["worst_verdict"] = "MALICE_HIGH"
+    case["status"] = "malice"
+
+    second = _cycle(session, case, force=True)
+    plan = second["next_action"]
+    assert plan["in_hours"] <= 2, (
+        f"a case whose sealed record is MALICE was scheduled {plan['in_hours']}h "
+        f"out as: {plan['why']}")
+
+
+def test_a_case_with_malice_in_its_history_never_stands_down():
+    """An agent that cannot stop is a loop — but stopping on a compromised host
+    because the last few windows looked clean is worse."""
+    case = _case("AUTO-NOSTOP")
+    session = _session(ATTACK, "AUTO-NOSTOP")
+    _cycle(session, case)
+    case["worst_verdict"] = "MALICE_HIGH"
+    case["status"] = "malice"
+    for _ in range(5):
+        _cycle(session, case, force=True)
+    assert case["mission"]["standing_down"] is None

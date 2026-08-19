@@ -374,6 +374,13 @@ def plan_deterministically(session: PurpleTeamSession, case: dict,
 
     state = (verdict or {}).get("verdict_state", "")
     unresolved = brief.get("unresolved_questions", [])
+    # The case's sealed record, not just this cycle's window. A host whose
+    # history contains MALICE stays a compromised host even when a later
+    # window — the persistence surface, say — adjudicates to nothing alarming.
+    # Reading only the current verdict scheduled such a case as "quiet" for 24
+    # hours; that is the same downgrade the case store already refuses to make.
+    history = brief.get("sealed_worst_verdict") or ""
+    compromised = history.startswith("MALICE") or history == "ESCALATE"
 
     if state.startswith("MALICE"):
         tools["escalate_to_human"](
@@ -385,6 +392,13 @@ def plan_deterministically(session: PurpleTeamSession, case: dict,
             in_hours=1,
             why="a host under an adjudicated malicious verdict is watched closely "
                 "until a human takes it over")
+    elif compromised:
+        tools["schedule_next_cycle"](
+            action="re-collect running state to watch for further activity",
+            in_hours=1,
+            why=f"this window adjudicated {state or 'nothing'}, but the case's "
+                f"sealed record is {history} — a compromised host is not quiet "
+                f"because one later window looked clean")
     elif state.startswith("ABSTAIN") or unresolved:
         tools["schedule_next_cycle"](
             action="collect the surface not yet covered and adjudicate it",
