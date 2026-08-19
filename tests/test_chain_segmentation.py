@@ -298,17 +298,146 @@ def test_one_cycle_writes_one_mission_not_two(store):
     assert "add_hypothesis" in actions and "note_open_question" in actions
 
 
-def test_persisting_a_cycle_in_two_writes_is_what_forks_the_memory(store):
-    """The bug this API exists to prevent, pinned so it cannot come back by
-    someone reaching for apply_run + save_mission on a cycle again."""
+def test_persisting_a_cycle_in_two_writes_is_refused_not_forked(store):
+    """The bug apply_cycle exists to prevent, now caught twice.
+
+    Persisting a cycle as apply_run + save_mission re-reads the case between
+    them, so the run's own memory mutations land on a different mission object
+    than the cycle's. That used to be written silently, leaving a memory chain
+    that failed verification. The divergence check refuses it instead — the
+    same guard that stops two concurrent cycles, catching the single-request
+    version of the same mistake.
+    """
     store.create_case("FORK", {"hostname": "H"}, "perito")
     mission = store.get_case("FORK")["mission"]
     mem.begin_cycle(mission, actor="fleet-commander", trigger="test")
 
     store.apply_run("FORK", [], [{"verdict_state": "ABSTAIN_INSUFFICIENT"}], [])
-    store.save_mission("FORK", mission)
+    with pytest.raises(chain_store.ConcurrentModificationError, match="diverged"):
+        store.save_mission("FORK", mission)
 
-    broken = mem.verify_mission(store.get_case("FORK")["mission"])
-    assert not broken["memory_ok"], (
-        "two separate writes no longer fork the memory — if that is "
-        "deliberate, this test should be deleted along with apply_cycle")
+    # and what is stored is still a chain that verifies
+    assert mem.verify_mission(store.get_case("FORK")["mission"])["memory_ok"]
+
+
+def test_two_cycles_racing_one_case_lose_the_race_rather_than_the_record(store):
+    """Two writers appending to one hash chain are two branches, not one chain.
+
+    Writing either over the other drops the loser's reasoning and leaves a head
+    that does not match the journal — verification then reports tampering on a
+    record nobody tampered with. The second writer is refused instead.
+    """
+    store.create_case("RACE", {"hostname": "H"}, "perito")
+    first = store.get_case("RACE")["mission"]
+    second = store.get_case("RACE")["mission"]
+    mem.add_hypothesis(first, actor="fleet-commander", text="A: beacon")
+    mem.add_hypothesis(second, actor="fleet-commander", text="B: persistence")
+
+    store.apply_cycle("RACE", [_entry(0)], [{"verdict_state": "MALICE_HIGH"}],
+                      [], first)
+    with pytest.raises(chain_store.ConcurrentModificationError):
+        store.apply_cycle("RACE", [_entry(1)],
+                          [{"verdict_state": "MALICE_HIGH"}], [], second)
+
+    stored = store.get_case("RACE")
+    assert mem.verify_mission(stored["mission"])["memory_ok"]
+    texts = [h["text"] for h in stored["mission"]["hypotheses"]]
+    assert texts == ["A: beacon"], texts
+    assert [e["sequence"] for e in stored["entries"]] == [0]
+
+
+def test_a_shorter_chain_than_the_stored_one_is_refused(store):
+    """A writer holding less history than is stored is working from state that
+    has since been replaced — it must not truncate the record."""
+    store.create_case("SHORT", {"hostname": "H"}, "perito")
+    mission = store.get_case("SHORT")["mission"]
+    for i in range(4):
+        mem.add_hypothesis(mission, actor="a", text=f"h{i}")
+    store.apply_cycle("SHORT", [], [], [], mission)
+
+    stale = dict(mission, journal=mission["journal"][:2])
+    with pytest.raises(chain_store.ConcurrentModificationError,
+                       match="has since been replaced"):
+        store.apply_cycle("SHORT", [], [], [], stale)
+
+
+def test_an_uncommitted_segment_write_is_invisible_until_the_index_commits_it(store):
+    """The case document's index is the commit point.
+
+    A write that stored a segment and then failed before updating the case
+    document left entries in a segment that no index accounts for. Reading
+    them back would show an entry that was never committed — and, when the
+    failure was a divergence check on a *later* chain, would show one writer's
+    verdict inside another writer's record.
+    """
+    store.create_case("COMMIT", {"hostname": "H"}, "perito")
+    store.apply_run("COMMIT", [_entry(0)], [], [])
+
+    # Simulate a crash after the segment write, before the document write.
+    seg_key = "cases/COMMIT/chain/entries-000000"
+    store.fake.docs[seg_key]["items"].append(_entry(99))
+
+    case = store.get_case("COMMIT")
+    assert [e["sequence"] for e in case["entries"]] == [0], (
+        "an uncommitted entry was read back as part of the record")
+
+
+def test_a_retried_write_stores_the_same_bytes_rather_than_duplicating(store):
+    """Segments are computed from the writer's chain, not read and extended, so
+    a retry after a failed commit is idempotent."""
+    store.create_case("RETRY", {"hostname": "H"}, "perito")
+    mission = store.get_case("RETRY")["mission"]
+    for i in range(3):
+        mem.add_hypothesis(mission, actor="a", text=f"h{i}")
+
+    # First attempt reaches the segments, then "fails" before the index commits.
+    store._append_chains("RETRY", {}, {"journal": mission["journal"]})
+    # The retry runs the whole persist, from the same uncommitted state.
+    store.apply_cycle("RETRY", [], [], [], mission)
+
+    journal = store.get_case("RETRY")["mission"]["journal"]
+    assert len(journal) == len(mission["journal"])
+    assert [e["seq"] for e in journal] == list(range(len(journal)))
+    assert mem.verify_mission(store.get_case("RETRY")["mission"])["memory_ok"]
+
+
+def test_a_chain_shorter_than_the_index_claims_is_refused(store):
+    """Losing a segment's tail must not read as a clean, shorter history."""
+    store.create_case("TRUNC", {"hostname": "H"}, "perito")
+    store.apply_run("TRUNC", [_entry(i) for i in range(4)], [], [])
+    store.fake.docs["cases/TRUNC/chain/entries-000000"]["items"] = [_entry(0)]
+    with pytest.raises(chain_store.ChainStoreError, match="incomplete"):
+        store.get_case("TRUNC")
+
+
+def test_a_case_written_before_segmentation_keeps_its_history(store):
+    """The migration path. Every case already in the database has its chains
+    inline and no index; reading those from segments would return nothing and
+    replace the real history with an empty list — a deploy would erase the
+    sealed chain of every existing case."""
+    legacy = {
+        "case_id": "LEGACY", "host": {"hostname": "WIN11"},
+        "examiner_id": "perito", "created_utc": "2026-08-01T00:00:00Z",
+        "updated_utc": "2026-08-01T00:00:00Z", "status": "malice",
+        "worst_verdict": "MALICE_HIGH", "runs": 1, "demo": False,
+        "scenario": "attack", "open_question": None,
+        "entries": [_entry(i) for i in range(5)],
+        "verdicts": [{"verdict_state": "MALICE_HIGH"}],
+        "audit_trail": [{"seq": 0, "action": "adjudicate"}],
+        "mission": mem.new_mission("LEGACY"),
+    }
+    mem.add_hypothesis(legacy["mission"], actor="a", text="from before")
+    store.fake.docs["cases/LEGACY"] = json.loads(json.dumps(legacy))
+
+    case = store.get_case("LEGACY")
+    assert len(case["entries"]) == 5
+    assert len(case["mission"]["journal"]) == 1
+    assert case["audit_trail"]
+
+    # and the next write migrates it into segments without losing anything
+    store.apply_run("LEGACY", [_entry(5)], [], [])
+    migrated = store.get_case("LEGACY")
+    assert [e["sequence"] for e in migrated["entries"]] == [0, 1, 2, 3, 4, 5]
+    assert migrated["chain_index"]["entries"]["count"] == 6
+    assert store.fake.docs["cases/LEGACY"]["entries"] == []
+    assert mem.verify_mission(migrated["mission"])["memory_ok"]

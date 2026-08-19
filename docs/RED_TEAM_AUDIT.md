@@ -180,3 +180,190 @@ actually done.
   exposure (RT-04).
 - Wrap `apply_run` in a Firestore transaction so concurrent runs on one case
   serialize instead of racing (RT-05).
+
+---
+
+# Red Team Round 4 — the autonomous fleet
+
+**Method:** Abductive Engineering (A–D–I) + Red-Team Auditing.
+**Scope:** the code built for autonomous operation — `agent/autonomy.py`,
+`agent/mission.py`, `agent/catalog.py`, `agent/principal.py`,
+`service/chain_store.py`, `service/case_store.py` and the service wiring.
+**Base:** `claude/agentic-autonomous-project-d9y5u0` @ `f3d17a0`, audited
+*before* the fixes in this round were applied.
+**Runtime:** Python 3.11.15, `google-adk` 2.1.0.
+**Reproducible evidence:** each finding below states its prediction before the
+observation; the inductions are the tests named with each one, which fail on
+`f3d17a0` and pass after the fix.
+
+This round is Round 2–3 material on the escalation ladder: not "is this
+function buggy" but "can the system reach a state its specification says is
+impossible". All three confirmed findings are in code written during this
+session — self-introduced, self-found, fixed.
+
+## Threat model
+Unchanged from Rounds 1–3, plus:
+- Attacker **CAN**: influence what the commander does, in the limit — through a
+  manipulated model, a prompt injection that reaches it, or simply a model that
+  errs. The design position is that a bad *choice* must cost a wasted
+  collection, never a wrong or an unwatched verdict.
+- Attacker **CANNOT**: write to Firestore directly; alter a sealed entry.
+- Not attacker-driven at all: **RT-06** and **RT-07** are ordinary defects.
+  They are in this report because their consequence — destroying or corrupting
+  the sealed record — is exactly what an attacker would want, and the system's
+  guarantee does not care which cause produced it.
+
+## Executive summary
+| ID | Severity | Level | Bucket | Finding |
+|----|----------|-------|--------|---------|
+| RT-06 | **Critical** | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | Every case written before chain segmentation loses its entire sealed chain, mission journal and audit trail on first read; the loss becomes permanent on the next write. |
+| RT-07 | High | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | Two cycles working one case silently drop one cycle's reasoning and leave the memory chain failing verification — the tamper-evidence mechanism reports tampering with no attacker present. |
+| RT-08 | High | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | The commander could stand down, or park for 30 days, a host the engine had just adjudicated `MALICE_HIGH` — with no human escalated to. |
+| RT-09 | Medium | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | Introduced by the RT-07 fix: a chain rejected part-way had already written its segment, so an uncommitted entry was readable as part of the record. |
+| RT-10 | Low | CODE FACT | hygiene | The narration/escalation seal check compares verdict *tokens*; a claim that names a verdict the cycle did seal, but attaches it to the wrong host or window, is not caught. |
+
+---
+
+## RT-06 — A deploy erases the sealed chain of every existing case
+
+**Severity:** Critical **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+- **Surprise:** segmentation was added as a pure storage change, but storage
+  changes have a migration, and this one had none.
+- **Abduction (ranked):** (1) `_assemble` unconditionally replaces each chain
+  field from its segment index, so a document with no index yields `[]`;
+  (2) the arrays are left alone when absent from the index; (3) reads fail
+  loudly on an unknown shape. (1) is cheapest to test and matches the code.
+- **Deduction:** write a case document in the pre-segmentation shape — arrays
+  inline, no `chain_index` — and read it. Predict `entries == []` where five
+  were stored, and that the next write persists the emptiness.
+- **Induction:** observed `entries 5 → 0`, `journal 1 → 0`, `audit 1 → 0`; after
+  one further write the stored index reads `{'segments': 0, 'count': 0}`.
+  Prediction holds.
+- **Causal chain:** deploy → `get_case` → `_assemble` → `index.get(field)` is
+  `None` → `read_all(None)` returns `[]` → `case[field] = []` → `_persist`
+  writes the emptiness → the case's sealed history no longer exists.
+- **Precondition:** any case in the database predating the segmentation commit.
+  The live service runs pre-segmentation code, so *every* deployed case
+  qualifies. Reachable by deploying, not by attacking.
+- **Fix:** a field with no index has never been segmented and is left exactly
+  as stored; the next write migrates it into segments.
+  `tests/test_chain_segmentation.py::test_a_case_written_before_segmentation_keeps_its_history`
+
+## RT-07 — Two cycles on one case corrupt the record they are meant to protect
+
+**Severity:** High **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+Round 1–3 recorded this class as RT-05: last-write-wins, "caught by
+`verify_stream`, never silent". Segmentation changed that, for the worse.
+
+- **Deduction (first attempt, FALSIFIED):** predicted that concurrent writers
+  would lose sealed verdict entries. Observed `[0, 1, 100, 101]` — all four
+  present. `apply_cycle` re-reads the case, so the verdict stream survives.
+  The vector was wrong and is corrected below rather than quietly restated.
+- **Deduction (corrected):** the new entries are computed as `chain[count:]`,
+  which assumes the writer's chain is an *extension* of the stored one. Under
+  two writers it is a divergent *branch* from the same point. Predict: the
+  first writer's journal survives, the second writer's journal entries are
+  absent, `memory_head` belongs to the second writer, and `verify_mission`
+  reports tampering.
+- **Induction:** observed exactly that — journal contains `A: beacon on port
+  443`, the mission's hypotheses list contains `B: scheduled task
+  persistence`, `memory_head` is B's, and `verify_mission` → `False,
+  ['memory_head does not match the end of the journal']`. The record's summary
+  and its tamper-evident log disagree, and the integrity signal fires with no
+  attacker present.
+- **Why that is worse than losing data:** a false tampering alarm on a
+  legitimate record is not a smaller failure than data loss. It teaches an
+  examiner to distrust the one mechanism that is supposed to be trustworthy.
+- **Fix:** the index carries the chain's head; a writer whose entry at the
+  stored position does not match it is refused with
+  `ConcurrentModificationError` rather than written. The service returns 409;
+  the sweep records `concurrent write` and moves on. The same guard catches the
+  single-request version of the mistake (`apply_run` + `save_mission`), which
+  is now refused instead of silently forking.
+  `tests/test_chain_segmentation.py::test_two_cycles_racing_one_case_lose_the_race_rather_than_the_record`
+
+## RT-08 — The fleet could abandon a host the engine called malicious
+
+**Severity:** High **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+- **Surprise:** the deterministic planner had just been fixed to keep a
+  compromised host on a short interval. The agent path had the same rule only
+  in its instruction — and this project's stated position is that guarantees
+  are structural, not prompted.
+- **Deduction:** `schedule_next_cycle` accepts any 1–720 hours with no
+  reference to the sealed record, and `stand_down` accepts any rationale.
+  Predict a commander that seals `MALICE_HIGH`, schedules 720 hours out and
+  stands down: both succeed, `is_due` returns `False` forever, no escalation.
+- **Induction:** ran it through the real ADK loop with a scripted model.
+  Observed `sealed: ['MALICE_HIGH']`, `standing_down: "the situation is under
+  control"`, `is_due: False`, `escalated: False`. Prediction holds — the host
+  is never looked at again and nobody is told.
+- **Precondition:** a commander that errs or is manipulated. Note the bucket:
+  this is a vulnerability, not a threat-model assumption, precisely because
+  the architecture's claim is that a bad model choice cannot produce a bad
+  outcome. Here it could.
+- **Fix, in three parts, all reading the SEALED record only (the case's worst
+  verdict and what this session sealed — never mission memory, which the agent
+  writes):** `stand_down` is refused on a compromised host; a schedule beyond
+  two hours is refused; and a sealed `MALICE` verdict raises the escalation
+  **mechanically, attributed to the engine**, when the cycle closes without
+  one. The commander tried both refusals and the case ended escalated and
+  scheduled two hours out.
+  `tests/test_commander_loop.py::test_the_fleet_cannot_park_or_abandon_a_host_the_engine_called_malicious`
+
+## RT-09 — The RT-07 fix wrote half an operation
+
+**Severity:** Medium **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+Found by the RT-07 regression test failing in an unexpected way — the second
+writer's *sealed entry* appeared in the record although its write had been
+refused.
+
+- **Cause:** chains were validated and written in one pass over four fields.
+  The verdict stream passed its check and was written; the journal then
+  diverged and raised. The segment was on disk; the case document, which was
+  never updated, still counted one fewer entry. `read_all` returned everything
+  in the referenced segments, so an entry that was never committed was
+  readable — one writer's verdict inside another writer's record.
+- **Fix:** every chain is checked before any is written, so an abort writes
+  nothing; segments are computed as slices of the writer's chain rather than
+  read-modify-written, so a retry stores the same bytes instead of
+  duplicating; and the case document's index is the single commit point —
+  `read_all` returns exactly `count` entries, so anything a half-finished
+  write left beyond it is invisible until an index commits it. A chain
+  *shorter* than the index claims is refused, not read as a clean shorter
+  history.
+  `tests/test_chain_segmentation.py::test_an_uncommitted_segment_write_is_invisible_until_the_index_commits_it`
+
+## RT-10 — The seal check compares verdicts, not their subjects
+
+**Severity:** Low **Level:** CODE FACT **Bucket:** hygiene
+
+`unsealed_verdict_claims` flags a verdict state named in an escalation or
+narration that the cycle did not seal. It does not check what the claim is
+*about*: "MALICE_HIGH on the domain controller" passes when `MALICE_HIGH` was
+sealed on the workstation. Recorded, not fixed — the honest description of the
+guard is "it cannot invent a verdict", not "it cannot say anything false", and
+the escalation now carries the sealed basis (state, entry hash, sequence)
+beside the prose for a human to compare.
+
+## Falsified / defended vectors
+
+| Vector | Result | Why |
+|---|---|---|
+| Concurrent writers lose sealed verdict entries | **FALSIFIED** | `apply_cycle` re-reads the case, so the verdict stream survives; the damage is to the journal (RT-07). |
+| Mission memory can change a verdict or a case's status | **Defended** | `_apply_run` computes status from the sealed chain alone; the existing test fills memory with a stand-down declaring the host clean and every seal is unmoved. |
+| The catalog gate can be bypassed on the agent path | **Defended** | The gate is at the tool boundary, so it fires whichever planner runs (`test_the_catalog_still_refuses_the_soc_on_the_agent_path`). |
+| An agent can pass a score, verdict or hash | **Defended** | No tool in any approved manifest accepts one; the tool-schema tests pin every declaration to its signature. |
+| An agent can add a tool out of band | **Defended** | The sealed registry refuses to build an agent whose manifest hash is not approved, on the build path. |
+
+## Recommendations (record only)
+
+- A Firestore transaction around read-modify-write would turn RT-07's refusal
+  into a retry the caller never sees. The refusal is correct and honest; a
+  transaction would also be *convenient*.
+- `verdicts` and `audit_trail` carry no per-entry identity, so divergence
+  between two writers cannot be detected for them — only the two hash chains
+  are protected. Giving them an identity would close the gap.

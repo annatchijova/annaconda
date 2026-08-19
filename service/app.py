@@ -43,6 +43,7 @@ from agent.tools import PurpleTeamSession
 from core.verdict_stream import GENESIS_HASH, verify_stream
 from ml.nominator import SurprisalNominator, events_from_artifacts
 from service.case_store import build_case_store
+from service.chain_store import ConcurrentModificationError
 from tools.velociraptor.adapter import MockTransport, window_to_case
 from tools.velociraptor.vql_templates import TEMPLATES
 
@@ -684,6 +685,15 @@ async def sweep(req: Request) -> dict:
             result = await _run_cycle_on_case(
                 case, department=principal["department"],
                 trigger="cloud-scheduler", principal=principal)
+        except ConcurrentModificationError as exc:
+            # Another writer reached this case first. Its work stands; this
+            # cycle's is discarded rather than written over the top. The next
+            # sweep picks the case up from current state.
+            log.warning("autonomous cycle on case %s lost a write race: %s",
+                        cid, exc)
+            skipped.append({"case_id": cid, "reason": "concurrent write",
+                            "detail": str(exc)})
+            continue
         except Exception as exc:  # noqa: BLE001
             # One bad case must not stop the sweep for every other case.
             log.exception("autonomous cycle failed on case %s", cid)
@@ -765,9 +775,15 @@ async def run_case_cycle(case_id: str, req: CycleRequest,
                             detail="rate limited — an agentic cycle calls "
                                    "Gemini; try again in a few seconds")
     principal = _principal_for(request, req.department)
-    result = await _run_cycle_on_case(case, department=principal["department"],
-                                      trigger="operator", force=req.force,
-                                      principal=principal)
+    try:
+        result = await _run_cycle_on_case(
+            case, department=principal["department"], trigger="operator",
+            force=req.force, principal=principal)
+    except ConcurrentModificationError as exc:
+        # Another cycle wrote this case while this one was working. Refusing is
+        # the honest outcome — writing would drop one cycle's reasoning and
+        # leave the memory chain failing verification.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     updated = _CASE_STORE.get_case(case_id) or case
     return {"cycle": result, "status": updated.get("status"),
             "worst_verdict": updated.get("worst_verdict"),

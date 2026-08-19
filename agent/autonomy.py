@@ -116,6 +116,25 @@ def sealed_verdicts(session: PurpleTeamSession) -> list:
             if e["action"] == "adjudicate" and "verdict_state" in e["detail"]]
 
 
+# How closely a host whose sealed record is malicious must be re-checked. The
+# fleet may choose any interval up to this on such a case; it may not park it.
+COMPROMISED_MAX_INTERVAL_H = 2
+
+
+def is_compromised(session: PurpleTeamSession, case: dict) -> bool:
+    """Whether the SEALED record says this host is compromised.
+
+    Read only from adjudicated sources — the case's worst verdict, which the
+    case store computes from its sealed chain, and what this session sealed.
+    Never from mission memory, which the agent writes.
+    """
+    worst = (case or {}).get("worst_verdict") or ""
+    if worst.startswith("MALICE") or worst == "ESCALATE":
+        return True
+    return any(v.get("verdict_state", "").startswith("MALICE")
+               for v in sealed_verdicts(session))
+
+
 def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
                     *, department: str = COMMANDER_DEPARTMENT,
                     log_sink: Optional[list] = None) -> list:
@@ -239,6 +258,19 @@ def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
         """Set when this case should be worked again and what to do then.
         ``in_hours`` is 1 to 720. The sweep will not touch this case before
         then — this is how the fleet paces itself across weeks."""
+        if (isinstance(in_hours, int) and not isinstance(in_hours, bool)
+                and in_hours > COMPROMISED_MAX_INTERVAL_H
+                and is_compromised(session, case)):
+            # Structural, not advisory. The instruction asks the commander to
+            # weigh the sealed record; this makes parking a host the engine
+            # adjudicated malicious impossible rather than discouraged.
+            _note(COMMANDER_NAME, "schedule_refused",
+                  detail=f"{in_hours}h on a host whose sealed record is "
+                         f"malicious")
+            return {"error": f"this host's sealed record is malicious, so it "
+                             f"cannot be scheduled more than "
+                             f"{COMPROMISED_MAX_INTERVAL_H}h out; choose a "
+                             f"shorter interval"}
         try:
             plan = mem.schedule_next_action(mission, actor=COMMANDER_NAME,
                                             action=action, in_hours=in_hours,
@@ -275,6 +307,12 @@ def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
     def stand_down(rationale: str) -> dict:
         """Stop scheduling autonomous cycles on this case. The sealed record and
         the case's status are untouched; a human can always reopen it."""
+        if is_compromised(session, case):
+            _note(COMMANDER_NAME, "stand_down_refused",
+                  detail="the sealed record of this host is malicious")
+            return {"error": "this host's sealed record is malicious — the "
+                             "fleet does not stop watching it. Escalate to a "
+                             "human instead, and schedule a short interval."}
         try:
             sd = mem.stand_down(mission, actor=COMMANDER_NAME, rationale=rationale)
         except mem.MissionError as exc:
@@ -480,21 +518,51 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
             plan_deterministically(session, case, mission,
                                    department=department, log_sink=events)
 
+        compromised = is_compromised(session, case)
+
+        # A malicious verdict reaches a human because the ENGINE reached it,
+        # not because the commander chose to say so. The planner escalates; an
+        # agent might not, and a cycle that seals MALICE and tells nobody is
+        # the failure this whole system exists to prevent. Raised here, from
+        # the sealed record, with the basis attached mechanically.
+        malice = [v for v in sealed_verdicts(session)
+                  if v.get("verdict_state", "").startswith("MALICE")]
+        if malice and mission.get("escalation") is None:
+            mem.escalate(
+                mission, actor="engine",
+                why=f"the sealed engine adjudicated "
+                    f"{malice[0]['verdict_state']} on this host and the cycle "
+                    f"closed without escalating",
+                what_to_check="confirm containment, then review the sealed "
+                              "chain and the MITRE techniques the engine "
+                              "returned",
+                sealed_basis=malice)
+            events.append({"role": "engine", "action": "escalate_to_human",
+                           "why": f"sealed {malice[0]['verdict_state']}; the "
+                                  f"cycle closed without escalating",
+                           "what_to_check": "confirm containment",
+                           "unsupported_by_seal": False,
+                           "unsealed_verdict_claims": []})
+
         # A cycle that ended with no decision about the case's future would
         # strand it: the sweep would revisit it every tick forever. Close that
         # hole here rather than trusting the planner to have done it.
         if (mission.get("next_action") is None
                 and not mission.get("standing_down")):
+            default_hours = COMPROMISED_MAX_INTERVAL_H if compromised else 24
             mem.schedule_next_action(
                 mission, actor=COMMANDER_NAME,
                 action="re-assess this case",
-                in_hours=24,
-                why="the cycle ended without setting its own next step; a "
-                    "default interval is applied so the case is neither "
-                    "stranded nor revisited every tick")
+                in_hours=default_hours,
+                why=("this host's sealed record is malicious, so the default "
+                     "interval is short" if compromised else
+                     "the cycle ended without setting its own next step; a "
+                     "default interval is applied so the case is neither "
+                     "stranded nor revisited every tick"))
             events.append({"role": COMMANDER_NAME,
                            "action": "default_schedule_applied",
-                           "detail": "the cycle set no next step; applied 24h"})
+                           "detail": f"the cycle set no next step; applied "
+                                     f"{default_hours}h"})
 
         annotate(root, **{
             "cycle.planner": planner,

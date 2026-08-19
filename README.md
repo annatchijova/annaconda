@@ -286,11 +286,10 @@ delegation by department, data class and region. Next:
 - **A live Velociraptor lab**, so the collection path runs against enrolled
   Windows endpoints rather than bundled telemetry — infrastructure, not code
   (the transport is real and proven).
-- **Multi-instance concurrency.** Cases are read-modify-written; two instances
-  working one case at the same moment could interleave. A single Cloud Run
-  instance serves the demo, and the fleet's per-case schedule keeps concurrent
-  cycles on one case rare — but rare is not never, and a transaction is the
-  right answer.
+- **A Firestore transaction around the case write.** Two cycles racing one case
+  are now *detected and refused* — the loser gets a 409 and the record stays
+  intact ([Round 4](docs/RED_TEAM_AUDIT.md)) — but a transaction would turn
+  that refusal into a retry the caller never sees.
 
 ## License & attributions
 

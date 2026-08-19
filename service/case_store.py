@@ -24,7 +24,9 @@ from typing import Optional
 from agent.mission import (
     load_mission, new_mission, note_open_question, resolve_open_question,
 )
-from service.chain_store import SegmentedChain, new_index
+from service.chain_store import (
+    ConcurrentModificationError, SegmentedChain, new_index,
+)
 
 log = logging.getLogger("annaconda.case_store")
 
@@ -317,26 +319,39 @@ class FirestoreCaseStore:
         """Append each chain's NEW entries and return the updated index."""
         collection = self._segments(case_id)
         updated = dict(index or {})
+        # Check every chain BEFORE writing any of them. A divergence found half
+        # way through would leave segments written that no index references —
+        # one logical operation must not land in pieces.
         for field in _CHAINED:
-            field_index = updated.get(field) or new_index()
-            already = int(field_index.get("count", 0))
-            fresh = chains.get(field, [])[already:]
-            updated[field] = SegmentedChain(collection, field).append(
-                field_index, fresh)
+            SegmentedChain(collection, field).check(
+                updated.get(field) or new_index(), chains.get(field, []))
+        for field in _CHAINED:
+            updated[field] = SegmentedChain(collection, field).append_from(
+                updated.get(field) or new_index(), chains.get(field, []))
         return updated
 
     def _assemble(self, case: dict) -> dict:
         """Put the segmented chains back, so every caller and every verifier
-        sees one unbroken history exactly as before segmentation."""
+        sees one unbroken history exactly as before segmentation.
+
+        A field with no index has never been segmented — which is exactly the
+        shape of every case written before segmentation existed, with its
+        chains still inline in the document. Reading those from segments would
+        return nothing and *replace* the real history with an empty list, so a
+        deploy would erase the sealed chain of every case already in the
+        database. A field without an index is therefore left exactly as stored,
+        and the next write migrates it into segments.
+        """
         collection = self._segments(case["case_id"])
         index = case.get("chain_index") or {}
         for field in ("entries", "verdicts", "audit_trail"):
-            case[field] = SegmentedChain(collection, field).read_all(
-                index.get(field))
+            if field in index:
+                case[field] = SegmentedChain(collection, field).read_all(
+                    index[field])
         mission = case.get("mission")
-        if isinstance(mission, dict):
+        if isinstance(mission, dict) and "journal" in index:
             mission["journal"] = SegmentedChain(collection, "journal").read_all(
-                index.get("journal"))
+                index["journal"])
         return case
 
     def _persist(self, case: dict) -> None:

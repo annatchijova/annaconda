@@ -167,6 +167,25 @@ but it is not done here and should not be claimed.
   enforces the same 1 MiB limit, over 1200 cycles' worth of chain (the
   unsegmented document would be 1.28 MiB), and checks that a chain still
   verifies across segment boundaries.
+
+- **Concurrent writers are refused, not merged.** Two cycles working one case
+  are two branches of one hash chain, not one longer chain. Writing either over
+  the other drops a cycle's reasoning and leaves a chain that fails
+  verification — a tampering alarm on a record nobody tampered with. The stored
+  chain head is checked before any write and a divergent writer is refused
+  (409 on the endpoint, a recorded `concurrent write` skip in the sweep). The
+  case document's index is the single commit point, so a half-finished write
+  leaves nothing readable. This was found by auditing the segmentation change,
+  and is written up as RT-07 and RT-09 in
+  [RED_TEAM_AUDIT.md](RED_TEAM_AUDIT.md).
+
+- **The fleet cannot abandon a compromised host.** Standing a case down, or
+  scheduling it more than two hours out, is refused when the *sealed* record
+  says the host is malicious — read from the case's worst verdict and what the
+  session sealed, never from mission memory, which the agent writes. And a
+  sealed `MALICE` verdict raises an escalation mechanically, attributed to the
+  engine, if the cycle closes without one. Before this, a commander could seal
+  `MALICE_HIGH`, stand the case down, and tell nobody (RT-08).
 - **Rate limiting** on the paid endpoints is a coarse per-instance sliding
   window (`VIGIA_RATE_MAX`). It stops a hammer; it is not a quota system.
 - **Authentication.** The catalog gate is only as good as the identity in front

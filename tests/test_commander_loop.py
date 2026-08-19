@@ -35,6 +35,7 @@ from tools.velociraptor.adapter import MockTransport  # noqa: E402
 REPO = Path(__file__).resolve().parent.parent
 ATTACK = REPO / "tests" / "fixtures" / "attack"
 INSUFFICIENT = REPO / "tests" / "fixtures" / "insufficient"
+BENIGN = REPO / "tests" / "fixtures" / "velociraptor"
 HOST = {"client_id": "C.1", "hostname": "WIN11-VICTIM", "os": "windows"}
 
 
@@ -238,3 +239,71 @@ def test_the_catalog_still_refuses_the_soc_on_the_agent_path():
     assert result["planner"] == "gemini"
     assert any(e["action"] == "refused_by_catalog" for e in result["fleet_log"])
     assert not result["verdicts"]
+
+
+ABANDON_A_COMPROMISED_HOST = [
+    {"tool": "read_mission_brief", "args": {}},
+    {"tool": "task_hunter", "args": {"specialist": "windows-hunter",
+                                     "reason": "baseline"}},
+    {"tool": "request_adjudication",
+     "args": lambda r: {"window_id": r.get("task_hunter", {}).get("window_id")}},
+    # ... and then walk away from a host the engine just called malicious.
+    {"tool": "schedule_next_cycle",
+     "args": {"action": "routine check", "in_hours": 720,
+              "why": "nothing further needed here"}},
+    {"tool": "stand_down",
+     "args": {"rationale": "the situation is under control"}},
+]
+
+
+def test_the_fleet_cannot_park_or_abandon_a_host_the_engine_called_malicious():
+    """The rule was in the planner and in the instruction; it is in the tool
+    contract now.
+
+    A commander that seals MALICE_HIGH and then schedules the case 30 days out
+    and stands it down used to succeed at both: the host was never looked at
+    again and no human was told. Both are refused from the SEALED record — the
+    case's worst verdict and what this session sealed, never mission memory,
+    which the agent writes.
+    """
+    case = _case("LOOP-ABANDON")
+    result = _run(_session(case_id="LOOP-ABANDON"), case,
+                  ABANDON_A_COMPROMISED_HOST)
+
+    assert result["verdicts"][0]["verdict_state"] == "MALICE_HIGH"
+    refusals = {e["action"] for e in result["fleet_log"]}
+    assert "schedule_refused" in refusals
+    assert "stand_down_refused" in refusals
+
+    assert result["standing_down"] is None, "the fleet abandoned a malicious host"
+    assert result["next_action"]["in_hours"] <= autonomy.COMPROMISED_MAX_INTERVAL_H
+    assert mem.is_due(case["mission"],
+                      now=None) is False  # scheduled, not stranded
+
+
+def test_a_sealed_malicious_verdict_reaches_a_human_even_if_the_agent_is_silent():
+    """The escalation is raised because the ENGINE reached the verdict, not
+    because the commander chose to mention it."""
+    case = _case("LOOP-SILENT")
+    result = _run(_session(case_id="LOOP-SILENT"), case,
+                  ABANDON_A_COMPROMISED_HOST)
+    escalation = case["mission"]["escalation"]
+    assert escalation is not None
+    assert escalation["sealed_basis"][0]["verdict_state"] == "MALICE_HIGH"
+    assert escalation["unsupported_by_seal"] is False
+    # attributed to the engine, not to the agent that stayed silent
+    raised = [e for e in case["mission"]["journal"]
+              if e["action"] == "escalate_to_human"]
+    assert raised and raised[-1]["actor"] == "engine"
+
+
+def test_a_benign_host_can_still_be_stood_down():
+    """The gate must not make the fleet unable to stop on a quiet host."""
+    case = _case("LOOP-BENIGN")
+    plan = [
+        {"tool": "read_mission_brief", "args": {}},
+        {"tool": "stand_down", "args": {"rationale": "nothing left to check"}},
+    ]
+    result = _run(_session(BENIGN, "LOOP-BENIGN"), case, plan)
+    assert result["standing_down"] is not None
+    assert not mem.is_due(case["mission"])

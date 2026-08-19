@@ -42,6 +42,18 @@ class ChainStoreError(ValueError):
     """An entry could not be stored in any segment."""
 
 
+class ConcurrentModificationError(RuntimeError):
+    """The chain being written diverged from the one that is stored.
+
+    Two writers that both read a case and then both append are not extending
+    one chain — they are two branches from the same point. Writing either one
+    over the other silently drops the loser's entries and leaves a head that
+    does not match the journal, so verification reports tampering on a record
+    nobody tampered with. Refusing the write is the only honest outcome: the
+    caller retries against current state.
+    """
+
+
 class DocumentCollection(Protocol):
     """The minimum a backend must offer: read one, write one, list ids."""
 
@@ -58,45 +70,65 @@ def sizeof(item) -> int:
 
 
 def new_index() -> dict:
-    """The index a case document carries for one chain."""
-    return {"segments": 0, "count": 0, "tail_bytes": 0}
+    """The index a case document carries for one chain.
+
+    ``boundaries[k]`` is the position in the chain of the first entry stored in
+    segment k, so a segment's content is a pure slice of the chain the writer
+    holds. That makes writing a segment idempotent — it is computed, never
+    read-modify-written — and it makes the case document the single commit
+    point: ``count`` is how many entries are committed, and anything a
+    half-finished write left in a segment beyond that is ignored until an index
+    commits it.
+    """
+    return {"segments": 0, "count": 0, "tail_bytes": 0, "head": None,
+            "boundaries": []}
+
+
+def head_of(item) -> Optional[str]:
+    """The chain hash of an entry, when it has one.
+
+    Only the two hash chains (the sealed verdict stream and the mission
+    journal) carry ``entry_hash``. The other stored lists have no identity to
+    compare, so divergence between two writers cannot be detected for them —
+    stated here rather than left implied.
+    """
+    if isinstance(item, dict):
+        value = item.get("entry_hash")
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def segment_id(field: str, number: int) -> str:
     return f"{field}-{number:06d}"
 
 
-def plan_appends(index: dict, items: Iterable) -> tuple:
-    """Decide where each new item goes, without touching storage.
+def plan_appends(index: dict, items) -> dict:
+    """Where the new entries go, without touching storage.
 
-    Returns ``(writes, new_index)`` where ``writes`` is a list of
-    ``(segment_number, items, appends_to_existing)`` — the tail segment is
-    extended when the items fit, otherwise fresh segments are started. Pure, so
-    the placement rule is testable on its own.
+    Returns the index the chain would have after appending. Pure, so the
+    placement rule is testable on its own.
     """
-    segments = int(index.get("segments", 0))
+    boundaries = list(index.get("boundaries") or [])
     count = int(index.get("count", 0))
     tail_bytes = int(index.get("tail_bytes", 0))
+    head = index.get("head")
 
-    writes: list = []
     for item in items:
         size = sizeof(item)
         if size > MAX_ENTRY_BYTES:
             raise ChainStoreError(
                 f"a single chain entry of {size} bytes exceeds the "
                 f"{MAX_ENTRY_BYTES}-byte segment budget and cannot be stored")
-        if segments == 0 or tail_bytes + size > SEGMENT_MAX_BYTES:
-            segments += 1
+        if not boundaries or tail_bytes + size > SEGMENT_MAX_BYTES:
+            boundaries.append(count)
             tail_bytes = 0
-            writes.append([segments - 1, [], False])
-        elif not writes or writes[-1][0] != segments - 1:
-            writes.append([segments - 1, [], True])
-        writes[-1][1].append(item)
         tail_bytes += size
         count += 1
+        head = head_of(item) or head
 
-    return ([tuple(w) for w in writes],
-            {"segments": segments, "count": count, "tail_bytes": tail_bytes})
+    return {"segments": len(boundaries), "count": count,
+            "tail_bytes": tail_bytes, "head": head, "boundaries": boundaries}
 
 
 class SegmentedChain:
@@ -106,29 +138,72 @@ class SegmentedChain:
         self.collection = collection
         self.field = field
 
-    def append(self, index: dict, items: list) -> dict:
-        """Append items, returning the updated index for the case document."""
-        if not items:
-            return dict(index or new_index())
-        writes, updated = plan_appends(index or new_index(), items)
-        for number, chunk, extends in writes:
-            doc_id = segment_id(self.field, number)
-            if extends:
-                existing = self.collection.read(doc_id) or {}
-                stored = list(existing.get("items", []))
-            else:
-                stored = []
-            stored.extend(chunk)
-            self.collection.write(doc_id, {"field": self.field,
-                                           "segment": number,
-                                           "items": stored})
+    def check(self, index: dict, chain: list) -> None:
+        """Refuse a writer whose chain is not an extension of the stored one.
+
+        Under two concurrent writers the caller's chain is a divergent branch
+        from the same point, not a longer version of the same chain, and
+        slicing by count would write the wrong entries — dropping the other
+        writer's work and leaving a head that does not match the journal, so
+        verification would report tampering on a record nobody tampered with.
+
+        Separated from the write so a caller can validate every chain before
+        committing any of them: a check that fired half way through would leave
+        segments written that no index references.
+        """
+        already = int((index or {}).get("count", 0))
+        if not already:
+            return
+        if len(chain) < already:
+            raise ConcurrentModificationError(
+                f"chain {self.field!r} has {already} stored entries but the "
+                f"writer holds only {len(chain)} — it is working from state "
+                f"that has since been replaced")
+        stored_head = (index or {}).get("head")
+        writer_head = head_of(chain[already - 1])
+        if stored_head and writer_head and stored_head != writer_head:
+            raise ConcurrentModificationError(
+                f"chain {self.field!r} diverged: the stored chain ends at "
+                f"{stored_head[:12]}… but the writer's entry at that position "
+                f"is {writer_head[:12]}… — another cycle wrote this case in "
+                f"between")
+
+    def append_from(self, index: dict, chain: list) -> dict:
+        """Store whatever part of ``chain`` is not yet committed.
+
+        Only the segments the new entries land in are written, and each is
+        written as a slice of ``chain`` rather than by reading and extending —
+        so a retry after a failed write stores the same bytes rather than
+        duplicating entries.
+        """
+        index = dict(index or new_index())
+        chain = list(chain or [])
+        already = int(index.get("count", 0))
+        if len(chain) <= already:
+            return index
+
+        updated = plan_appends(index, chain[already:])
+        boundaries = updated["boundaries"]
+        first_touched = max(0, len(index.get("boundaries") or []) - 1)
+        for number in range(first_touched, len(boundaries)):
+            start = boundaries[number]
+            end = (boundaries[number + 1] if number + 1 < len(boundaries)
+                   else updated["count"])
+            self.collection.write(segment_id(self.field, number),
+                                  {"field": self.field, "segment": number,
+                                   "start": start, "items": chain[start:end]})
         return updated
 
     def read_all(self, index: dict) -> list:
-        """Every entry, in order. Concatenating the segments reproduces exactly
-        the list the chain verifiers already consume."""
+        """Every committed entry, in order.
+
+        Truncated to the committed ``count``: the case document's index is the
+        commit point, so entries a half-finished write left in a segment beyond
+        it are not yet part of the record and must not be read as if they were.
+        """
+        index = index or {}
         out: list = []
-        for number in range(int((index or {}).get("segments", 0))):
+        for number in range(int(index.get("segments", 0))):
             doc = self.collection.read(segment_id(self.field, number))
             if doc is None:
                 # A missing segment is a hole in a chain that claims to be
@@ -139,7 +214,12 @@ class SegmentedChain:
                     f"stored history is incomplete and must not be verified as "
                     f"if it were whole")
             out.extend(doc.get("items", []))
-        return out
+        committed = int(index.get("count", len(out)))
+        if len(out) < committed:
+            raise ChainStoreError(
+                f"chain {self.field!r} claims {committed} entries but only "
+                f"{len(out)} are stored — the history is incomplete")
+        return out[:committed]
 
     def delete_all(self, index: dict) -> None:
         for number in range(int((index or {}).get("segments", 0))):
