@@ -85,7 +85,9 @@ and sets its own next wake-up.
 
 The cron is only the wake-up — the cadence is per case, decided by the fleet, so
 a 15-minute schedule does not mean a 15-minute collection interval on every
-host. `/health` reports `autonomous_sweeps`, `autonomous_cycles`,
+host. One wake-up runs at most `VIGIA_SWEEP_MAX_CYCLES` cycles (default 10),
+worst sealed verdict first, deferring the rest to the next one; raise it if your
+fleet is larger than your cron is frequent. `/health` reports `autonomous_sweeps`, `autonomous_cycles`,
 `cases_worked_last_sweep`, `cases_not_due_last_sweep` and `escalations_raised`.
 
 To watch one cycle without waiting for the cron, use `/fleet-console`, or:

@@ -262,8 +262,11 @@ function renderEscalation(e, i, m){
     : `<div><span class="flag">⚠ rests on no sealed verdict</span></div>`;
   const invented = (e.unsealed_verdict_claims || []).length
     ? `<div><span class="flag">⚠ names ${e.unsealed_verdict_claims.map(esc).join(", ")}, never sealed</span></div>` : "";
+  const who = e.acknowledged_by_authenticated
+    ? `<span class="mono">${esc(e.acknowledged_by)}</span> <span class="ok">(verified)</span>`
+    : `<span class="mono">${esc(e.acknowledged_by)}</span> <span class="dt">(asserted)</span>`;
   const state = e.acknowledged
-    ? `<div class="dt">taken up by <span class="mono">${esc(e.acknowledged_by)}</span> — ${esc(e.acknowledged_note)}</div>`
+    ? `<div class="dt">taken up by ${who} — ${esc(e.acknowledged_note)}</div>`
     : `<div><button class="ghost ack" data-index="${i}">Take this up</button></div>`;
   return `<div class="escal${current ? " current" : ""}${e.acknowledged ? " done" : ""}">
     <b>${esc(e.why)}</b> <span class="dt">— check: ${esc(e.what_to_check)}</span>

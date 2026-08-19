@@ -207,6 +207,8 @@ def health() -> dict:
         "autonomous_cycles": _SWEEP_STATE["cycles_total"],
         "cases_worked_last_sweep": _SWEEP_STATE["last_swept"],
         "cases_not_due_last_sweep": _SWEEP_STATE["last_skipped"],
+        "cases_deferred_last_sweep": _SWEEP_STATE["last_deferred"],
+        "sweep_cycle_cap": SWEEP_MAX_CYCLES,
         "escalations_raised": _SWEEP_STATE["escalations_total"],
         "commander_planner": ("gemini" if autonomy.model_reachable()
                               else "deterministic-fallback"),
@@ -393,6 +395,13 @@ def _session_for_case(case: dict, scenario: str) -> PurpleTeamSession:
 
 @app.post("/cases")
 def create_case(req: CaseCreateRequest) -> dict:
+    # A created case is due immediately, so on the public demo one
+    # unauthenticated POST here buys one Gemini turn on the next sweep. The cap
+    # in the sweep bounds the cost; this bounds the rate of arrival.
+    if not _rate_ok("create_case"):
+        raise HTTPException(status_code=429,
+                            detail="rate limited — each case joins the "
+                                   "autonomous sweep; try again in a few seconds")
     if _CASE_STORE.get_case(req.case_id) is not None:
         raise HTTPException(status_code=409, detail=f"case {req.case_id} already exists")
     host = {"client_id": req.client_id, "hostname": req.hostname, "os": "windows"}
@@ -634,7 +643,29 @@ def injection_demo() -> dict:
 # own schedule says it is due, so a quiet host is not re-collected every hour.
 
 _SWEEP_STATE = {"count": 0, "last_utc": None, "last_swept": 0,
-                "last_skipped": 0, "cycles_total": 0, "escalations_total": 0}
+                "last_skipped": 0, "cycles_total": 0, "escalations_total": 0,
+                "last_deferred": 0}
+
+# How many cycles one wake-up may run. Each cycle is a Gemini turn, and case
+# creation is unauthenticated on the public demo, so without a cap the cost of a
+# sweep is set by whoever created the most cases. Cases past the cap are not
+# dropped — they are deferred to the next wake-up, worst first.
+SWEEP_MAX_CYCLES = int(os.environ.get("VIGIA_SWEEP_MAX_CYCLES", "10"))
+
+
+def _sweep_priority(row: dict) -> tuple:
+    """Order for the cap: the cases that must not wait, first.
+
+    A host under an adjudicated malicious verdict outranks everything, then
+    whatever is most overdue. Without this, a flood of freshly created cases
+    would take the cap in list order and starve the hourly re-check of a
+    compromised host — the one case the whole schedule exists to protect.
+    """
+    from service.case_store import verdict_rank
+    autonomy_row = row.get("autonomy") or {}
+    due = autonomy_row.get("next_due_utc") or ""
+    # Never-scheduled cases sort after overdue ones with the same rank.
+    return (-verdict_rank(row.get("worst_verdict")), due or "9999")
 
 
 async def _run_cycle_on_case(case: dict, *, department: str, trigger: str,
@@ -671,8 +702,8 @@ async def sweep(req: Request) -> dict:
     # when it is, the cron runs as a verified identity like any operator. When
     # it is not, its department is asserted and every cycle says so.
     principal = _principal_for(req)
-    worked, skipped = [], []
-    for row in _CASE_STORE.list_cases():
+    worked, skipped, deferred = [], [], []
+    for row in sorted(_CASE_STORE.list_cases(), key=_sweep_priority):
         cid = row["case_id"]
         case = _CASE_STORE.get_case(cid)
         if case is None:
@@ -680,6 +711,12 @@ async def sweep(req: Request) -> dict:
         # Demo/showcase cases are left untouched so a judge always sees a clean,
         # predictable state (they drive those from /console themselves).
         if case.get("demo"):
+            continue
+        if len(worked) >= SWEEP_MAX_CYCLES:
+            # Deferred, not dropped — and said out loud, because a sweep that
+            # silently stopped part way would read as "every case is up to date".
+            deferred.append({"case_id": cid,
+                             "worst_verdict": row.get("worst_verdict")})
             continue
         try:
             result = await _run_cycle_on_case(
@@ -724,8 +761,11 @@ async def sweep(req: Request) -> dict:
     _SWEEP_STATE["last_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     _SWEEP_STATE["last_swept"] = len(worked)
     _SWEEP_STATE["last_skipped"] = len(skipped)
+    _SWEEP_STATE["last_deferred"] = len(deferred)
     return {"worked": len(worked), "cases": worked,
             "skipped": len(skipped), "not_due": skipped,
+            "deferred": len(deferred), "deferred_cases": deferred[:20],
+            "cycle_cap": SWEEP_MAX_CYCLES,
             "autonomous_sweeps_total": _SWEEP_STATE["count"],
             "autonomous_cycles_total": _SWEEP_STATE["cycles_total"]}
 
@@ -822,8 +862,8 @@ class AcknowledgeRequest(BaseModel):
 
 
 @app.post("/cases/{case_id}/escalations/{index}/acknowledge")
-def acknowledge_escalation(case_id: str, index: int,
-                           req: AcknowledgeRequest) -> dict:
+def acknowledge_escalation(case_id: str, index: int, req: AcknowledgeRequest,
+                           request: Request) -> dict:
     """A human takes up one escalation, saying what they did.
 
     This is the other half of escalation: an escalation stops being shown
@@ -833,10 +873,16 @@ def acknowledge_escalation(case_id: str, index: int,
     case = _CASE_STORE.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
+    # Who says they handled it, and whether we know that. An escalation for a
+    # sealed malicious verdict stops demanding attention when this is written,
+    # so the claim and its confidence have to travel together.
+    principal = _principal_for(request)
     mission = mem.attach(case)
     try:
-        entry = mem.acknowledge_escalation(mission, actor=req.examiner_id,
-                                           index=index, note=req.note)
+        entry = mem.acknowledge_escalation(
+            mission, actor=principal.get("identity") or req.examiner_id,
+            index=index, note=req.note,
+            authenticated=bool(principal.get("authenticated")))
     except mem.MissionError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     try:
@@ -848,6 +894,10 @@ def acknowledge_escalation(case_id: str, index: int,
 
 @app.post("/demo/seed")
 def demo_seed() -> dict:
+    if not _rate_ok("demo_seed"):
+        raise HTTPException(status_code=429,
+                            detail="rate limited — seeding deletes and rebuilds "
+                                   "the showcase cases")
     """Reset the showcase to a clean, predictable state — so a judge arriving on
     any day of the review window sees the same three cases: a resolved-benign
     host, a compromised host, and a host stuck in ABSTAIN with an open question

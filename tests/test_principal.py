@@ -161,3 +161,17 @@ def test_an_unconfigured_audience_leaves_the_principal_asserted(monkeypatch):
                    claimed_department="forensics")
     assert p["authenticated"] is False
     assert p["department"] == "forensics"
+
+
+def test_an_acknowledgement_records_whether_the_examiner_was_verified(client):
+    """Acknowledging is how a malicious verdict stops demanding attention. Who
+    claims to have handled it, and whether we know that, must travel together."""
+    client.post("/cases", json={"case_id": "ACK-P", "examiner_id": "perito-01",
+                                "scenario": "attack"})
+    client.post("/cases/ACK-P/cycle", json={})
+    client.post("/cases/ACK-P/escalations/0/acknowledge",
+                json={"note": "isolated", "examiner_id": "perito-01"})
+    entry = client.get("/cases/ACK-P/mission").json()["escalations"][0]
+    assert entry["acknowledged"] is True
+    assert entry["acknowledged_by_authenticated"] is False
+    assert entry["acknowledged_by"] == "perito-01"

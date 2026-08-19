@@ -487,3 +487,93 @@ shown without anybody handling it.
 - The escalation ranking is coarse by design (malicious / other-sealed /
   unsealed). If escalation reasons multiply it will need a real severity field
   rather than an inference from the basis.
+
+---
+
+# Red Team Round 6 — the service boundary, after the sweep became expensive
+
+**Method:** Abductive Engineering (A–D–I) + Red-Team Auditing.
+**Base:** `claude/agentic-autonomous-project-d9y5u0` @ `5f14149`, audited before
+the fixes in this round.
+**Scope:** the public HTTP surface, re-examined because *this session changed
+what it costs*. Rounds 1–3 recorded unauthenticated state-changing endpoints as
+hygiene (RT-04) when `/tasks/sweep` ran a scripted collection. It now runs a
+Gemini turn per due case, so the same endpoints are worth a second look at a
+different severity.
+
+## Executive summary
+| ID | Severity | Level | Bucket | Finding |
+|----|----------|-------|--------|---------|
+| RT-14 | Medium | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | One unauthenticated `POST /cases` buys one Gemini cycle on the next sweep, unbounded — 50 cases created by a stranger produced 50 cycles. |
+| RT-15 | Medium | CONFIRMED BY INDUCTION | **vulnerability (fixed, introduced by the RT-14 fix)** | A cycle cap without priority lets a flood of new cases push a compromised host past it on every sweep. |
+| RT-16 | Low–Med | CODE FACT | **vulnerability (fixed)** | Anyone could mark an escalation for a sealed `MALICE_HIGH` as handled by any named examiner, with no record of whether that identity was verified. |
+| — | — | **FALSIFIED** | — | Hammering `/tasks/sweep` does *not* repeat the work: `is_due` defuses it after the first call. |
+
+---
+
+## RT-14 — One POST buys one Gemini turn
+
+**Severity:** Medium **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+- **Abduction, two rivals:** (H1) hammering `/tasks/sweep` burns quota, each
+  call running cycles again; (H2) `is_due` defuses that, and the real lever is
+  case *creation*, which is also unauthenticated and leaves every new case
+  immediately due.
+- **Induction:** three consecutive sweeps → `worked=3`, then `worked=0`,
+  `worked=0`. **H1 FALSIFIED** — the sweep is self-limiting, and the schedule
+  the fleet sets for itself is what limits it. Then 50 cases created by an
+  unauthenticated caller → next sweep ran **50 cycles**, no rate limit hit.
+  **H2 holds.**
+- **Why it is worth a finding at all:** the cost of a wake-up was set by
+  whoever created the most cases, on a demo URL with a real Vertex bill behind
+  it.
+- **Fix:** a sweep runs at most `VIGIA_SWEEP_MAX_CYCLES` cycles (default 10);
+  the rest are **deferred and reported**, never silently dropped — a sweep that
+  stopped part way in silence would read as "every case is up to date".
+  `POST /cases` now carries the same rate limit as the other paid paths, so the
+  cap bounds cost per wake-up and the limit bounds arrival.
+  `tests/test_autonomous_service.py::test_a_sweep_caps_how_many_cycles_it_runs`
+
+## RT-15 — The cost fix created an availability hole
+
+**Severity:** Medium **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+A cap bounds cost and creates a queue, and a queue can be gamed.
+
+- **Deduction:** if the sweep takes cases in list order, a stranger who creates
+  more cases than the cap pushes the one host under an adjudicated `MALICE`
+  verdict past it — on every sweep, forever. The hourly re-check that Round 4
+  made structural would never run.
+- **Induction:** with priority ordering, a compromised host created *before* 30
+  flood cases is worked **first** (`worked[0] == "AAA-VICTIM"`), 41 cases
+  deferred. Without it the victim sorts by case id like everything else.
+- **Fix:** the sweep orders by worst sealed verdict first, then most overdue.
+  Cost is capped without starving the case the whole schedule exists to
+  protect.
+  `tests/test_autonomous_service.py::test_a_flood_of_new_cases_cannot_starve_a_compromised_host`
+
+## RT-16 — Anyone could mark a malicious escalation as handled
+
+**Severity:** Low–Medium **Level:** CODE FACT **Bucket:** vulnerability (fixed)
+
+`POST /cases/{id}/escalations/{i}/acknowledge` took `examiner_id` from the
+request body and wrote it as the person who took the escalation up. Since
+acknowledging is precisely how a sealed malicious verdict stops demanding
+attention (RT-13's fix), an unauthenticated caller could silence one under any
+name, and the record would not say the name was unverified.
+
+Not confirmed by induction: the endpoint is this session's own and the code
+path is unambiguous, so this is recorded as a CODE FACT rather than dressed up
+with an experiment that would only restate it.
+
+**Fix:** the acknowledgement resolves a principal like every other tasking and
+records `acknowledged_by_authenticated` beside the name — verified or asserted,
+travelling together, and shown as such on the console. `/demo/seed`, which
+deletes and rebuilds the showcase cases, is rate limited.
+
+## Recommendations (record only)
+
+- Case *storage* is still unbounded: the sweep cap limits cost per wake-up and
+  the rate limit slows arrival, but a patient stranger can still fill the
+  database. A case quota, or authentication on creation, is the real answer.
+- The rate limiter remains one per-process bucket per key, not per principal.

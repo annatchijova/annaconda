@@ -494,23 +494,31 @@ def escalate(mission: dict, *, actor: str, why: str, what_to_check: str,
 
 
 def acknowledge_escalation(mission: dict, *, actor: str, index: int,
-                           note: str) -> dict:
+                           note: str, authenticated: bool = False) -> dict:
     """Mark one escalation as taken up by a human, with who and what they said.
 
     The point of acknowledging is that the *next* unacknowledged one becomes
     what the case shows — an escalation stops being displayed because somebody
     handled it, never because something newer arrived.
+
+    ``authenticated`` says whether the examiner's identity was verified or
+    merely claimed. Acknowledging is how a malicious verdict stops demanding
+    attention, so "who says they handled it, and do we know that" is exactly
+    the pair that has to travel together — the same distinction the principal
+    carries everywhere else.
     """
     entries = mission.get("escalations") or []
     if not 0 <= index < len(entries):
         raise MissionError(f"no escalation at index {index}")
     entries[index]["acknowledged"] = True
     entries[index]["acknowledged_by"] = _text(actor, "actor", limit=120)
+    entries[index]["acknowledged_by_authenticated"] = bool(authenticated)
     entries[index]["acknowledged_note"] = _text(note, "note")
     entries[index]["acknowledged_utc"] = _now()
     mission["escalation"] = _current_escalation(mission)
     record(mission, actor=actor, action="acknowledge_escalation",
-           detail={"index": index, "note": entries[index]["acknowledged_note"]})
+           detail={"index": index, "note": entries[index]["acknowledged_note"],
+                   "authenticated": bool(authenticated)})
     return entries[index]
 
 

@@ -193,8 +193,19 @@ but it is not done here and should not be claimed.
   sealed `MALICE` verdict raises an escalation mechanically, attributed to the
   engine, if the cycle closes without one. Before this, a commander could seal
   `MALICE_HIGH`, stand the case down, and tell nobody (RT-08).
+- **Cost of an unattended wake-up is capped.** Every cycle is a Gemini turn and
+  case creation is unauthenticated on the demo, so one sweep's cost was set by
+  whoever created the most cases — 50 created by a stranger produced 50 cycles
+  (RT-14). A sweep now runs at most `VIGIA_SWEEP_MAX_CYCLES` (default 10) and
+  reports what it deferred, ordered worst-sealed-verdict first so the cap cannot
+  be used to starve a compromised host of its hourly re-check (RT-15).
+  Case *storage* is still unbounded — the cap limits cost, the rate limit slows
+  arrival, and a patient stranger can still fill the database. A quota, or
+  authentication on creation, is the real answer and is not built.
+
 - **Rate limiting** on the paid endpoints is a coarse per-instance sliding
-  window (`VIGIA_RATE_MAX`). It stops a hammer; it is not a quota system.
+  window (`VIGIA_RATE_MAX`), one bucket per endpoint rather than per principal.
+  It stops a hammer; it is not a quota system.
 - **Authentication.** The catalog gate is only as good as the identity in front
   of it, so `agent/principal.py` resolves one on every tasking and names its
   confidence. A presented Google identity token is verified and mapped to a

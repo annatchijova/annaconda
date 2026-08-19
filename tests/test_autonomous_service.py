@@ -183,3 +183,69 @@ def test_acknowledging_an_escalation_that_does_not_exist_is_a_404(client):
                        json={"note": "n", "examiner_id": "p"}).status_code == 404
     assert client.post("/cases/NOPE/escalations/0/acknowledge",
                        json={"note": "n", "examiner_id": "p"}).status_code == 404
+
+
+def _force_due(case_id):
+    from service.app import _CASE_STORE
+    case = _CASE_STORE.get_case(case_id)
+    case["mission"]["next_action"]["due_utc"] = "2020-01-01T00:00:00Z"
+    _CASE_STORE.save_mission(case_id, case["mission"])
+
+
+def test_a_sweep_caps_how_many_cycles_it_runs(client):
+    """Every cycle is a Gemini turn and case creation is unauthenticated on the
+    public demo, so without a cap the cost of a wake-up is set by whoever
+    created the most cases."""
+    from service.app import SWEEP_MAX_CYCLES, _RATE_HITS
+    for i in range(SWEEP_MAX_CYCLES + 5):
+        _RATE_HITS.clear()
+        _new_case(client, f"CAP-{i}", scenario="benign")
+    body = client.post("/tasks/sweep", json={}).json()
+    assert body["worked"] == SWEEP_MAX_CYCLES
+    assert body["deferred"] >= 5
+    assert body["cycle_cap"] == SWEEP_MAX_CYCLES
+
+
+def test_deferred_cases_are_reported_rather_than_silently_dropped(client):
+    """A sweep that stopped part way without saying so would read as 'every
+    case is up to date'."""
+    from service.app import SWEEP_MAX_CYCLES, _RATE_HITS
+    for i in range(SWEEP_MAX_CYCLES + 3):
+        _RATE_HITS.clear()
+        _new_case(client, f"DEFER-{i}", scenario="benign")
+    body = client.post("/tasks/sweep", json={}).json()
+    assert body["deferred_cases"], body
+    assert client.get("/health").json()["cases_deferred_last_sweep"] >= 3
+
+
+def test_a_flood_of_new_cases_cannot_starve_a_compromised_host(client):
+    """The cap bounds cost — and creates a queue, which can be gamed. Without
+    priority ordering a stranger's fifty new cases would push the one host
+    under an adjudicated malicious verdict past the cap on every sweep."""
+    from service.app import SWEEP_MAX_CYCLES, _RATE_HITS
+    _new_case(client, "AAA-VICTIM", scenario="attack")
+    _RATE_HITS.clear()
+    client.post("/cases/AAA-VICTIM/cycle", json={})
+    assert client.get("/cases/AAA-VICTIM").json()["case"]["status"] == "malice"
+
+    for i in range(SWEEP_MAX_CYCLES * 3):
+        _RATE_HITS.clear()
+        _new_case(client, f"ZZZ-FLOOD-{i}", scenario="benign")
+    _force_due("AAA-VICTIM")
+
+    body = client.post("/tasks/sweep", json={}).json()
+    worked = [w["case_id"] for w in body["cases"]]
+    assert worked[0] == "AAA-VICTIM", worked[:3]
+    assert body["deferred"] > 0
+
+
+def test_creating_a_case_is_rate_limited(client):
+    """A created case is due immediately, so one POST here buys one Gemini turn
+    on the next sweep."""
+    from service.app import _RATE_HITS, _RATE_MAX
+    _RATE_HITS.clear()
+    codes = [client.post("/cases", json={"case_id": f"RL-{i}",
+                                         "examiner_id": "x"}).status_code
+             for i in range(_RATE_MAX + 2)]
+    assert 429 in codes, codes
+    _RATE_HITS.clear()
