@@ -145,13 +145,28 @@ but it is not done here and should not be claimed.
 
 ## Other honest limits
 
-- **Firestore document size.** A case document holds its sealed entries and its
-  mission journal, and both grow with every cycle. Firestore's 1 MiB per-document
-  limit will eventually be reached on a long-running case. Truncating a hash
-  chain to fit would break its verification — which is the chain working as
-  designed — so the real fix is chunking the chain across documents. It is not
-  implemented. A case worked daily has ample headroom for the review period;
-  a multi-year deployment does not.
+- **Firestore document size — measured, and corrected.** An earlier version of
+  this document said a case worked daily had "ample headroom" and only a
+  multi-year deployment would meet Firestore's 1 MiB per-document limit. That
+  was wrong, and measurement is why: a cycle adds about 4 KB across the sealed
+  stream and the mission journal, so one document is full at roughly **270
+  cycles**. The case that reaches it first is the one that matters most — a
+  host under an adjudicated malicious verdict is re-checked hourly, which is
+  about **eleven days**, not years.
+
+  Truncating a hash chain to fit is not an option: a chain you can shorten is a
+  chain an attacker can shorten. So the chains are stored in bounded segment
+  documents (`service/chain_store.py`), with the case document keeping only an
+  index. Reading concatenates the segments in order, reproducing exactly the
+  list the verifiers already consume, so `verify_stream` and `verify_mission`
+  are unchanged and still span the whole history. A missing segment is refused
+  rather than verified as if it were whole — a verifier handed a silently short
+  list would report a clean chain over incomplete history.
+
+  `tests/test_chain_segmentation.py` runs the real store against a double that
+  enforces the same 1 MiB limit, over 1200 cycles' worth of chain (the
+  unsegmented document would be 1.28 MiB), and checks that a chain still
+  verifies across segment boundaries.
 - **Rate limiting** on the paid endpoints is a coarse per-instance sliding
   window (`VIGIA_RATE_MAX`). It stops a hammer; it is not a quota system.
 - **Authentication.** The catalog gate is only as good as the identity in front

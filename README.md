@@ -121,6 +121,9 @@ unresolved questions, the escalation it raised and why. Memory an autonomous
 fleet keeps for weeks is memory an attacker has weeks to edit, so every mutation
 seals a journal entry onto the previous one with the same SHA-256 recipe that
 seals verdicts; `GET /cases/{id}/mission` re-verifies the chain on every read.
+Both chains are stored in bounded segments (`service/chain_store.py`), because a
+host re-checked hourly fills a single Firestore document in about eleven days —
+and a chain you can truncate to fit is a chain an attacker can truncate.
 
 **What the fleet says is checked against what it sealed.** Every escalation
 carries the verdict states and entry hashes the cycle actually sealed, read from
@@ -280,11 +283,14 @@ cycle that works cases unattended, with tamper-evident mission memory, a
 per-case schedule it sets itself, and an enterprise catalog that gates every
 delegation by department, data class and region. Next:
 
-- **Chunking the sealed chains across Firestore documents**, so a case worked
-  daily for years does not meet the 1 MiB per-document limit (see
-  [docs/COMPLIANCE.md](docs/COMPLIANCE.md)).
-- **Authenticating the department**, so the catalog's principal comes from a
-  Cloud Run identity token rather than the request body.
+- **A live Velociraptor lab**, so the collection path runs against enrolled
+  Windows endpoints rather than bundled telemetry — infrastructure, not code
+  (the transport is real and proven).
+- **Multi-instance concurrency.** Cases are read-modify-written; two instances
+  working one case at the same moment could interleave. A single Cloud Run
+  instance serves the demo, and the fleet's per-case schedule keeps concurrent
+  cycles on one case rare — but rare is not never, and a transaction is the
+  right answer.
 
 ## License & attributions
 

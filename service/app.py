@@ -648,14 +648,14 @@ async def _run_cycle_on_case(case: dict, *, department: str, trigger: str,
     if not result["acted"]:
         return result
 
-    if result["verdicts"]:
-        _CASE_STORE.apply_run(cid, list(session._entries), result["verdicts"],
-                              session.audit_trail)
-    # Written after apply_run: on Firestore that call re-reads the stored
-    # document, so the mission has to be persisted last or it is overwritten.
-    # And it is persisted even when the cycle sealed nothing — a cycle that
-    # only reasoned still changed what the next one knows.
-    _CASE_STORE.save_mission(cid, case["mission"])
+    # One write, carrying both the sealed output and the memory the cycle
+    # reasoned into. Persisting them separately would re-read the case between
+    # them and fork the memory into two objects appending to one hash chain —
+    # see FirestoreCaseStore.apply_cycle. The memory is persisted even when the
+    # cycle sealed nothing: a cycle that only reasoned still changed what the
+    # next one knows.
+    _CASE_STORE.apply_cycle(cid, list(session._entries), result["verdicts"],
+                            session.audit_trail, case["mission"])
     return result
 
 
