@@ -6,6 +6,9 @@ sse-starlette==3.4.4
 google-adk==2.1.0
 google-genai==1.75.0
 google-cloud-firestore==2.28.1
+# Sealed-verdict push to Google SecOps (Chronicle) over Pub/Sub (optional;
+# degrades to 'unavailable' when the client or SECOPS_PUBSUB_TOPIC is absent).
+google-cloud-pubsub>=2.27,<3
 # Reasoning-chain tracing to Cloud Trace (optional; degrades to no-op)
 opentelemetry-sdk==1.41.1
 opentelemetry-exporter-gcp-trace==1.14.0
