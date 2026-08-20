@@ -12,22 +12,26 @@ https://vigia-live-1028999311218.us-central1.run.app
 
 ## Category
 
-**Recommendation: Fortified Enterprise Fleet** if the specialized fleet lands
-(dispatcher + per-platform hunters + persistence + correlation, disjoint tool
-contracts). **Fallback: Taskmaster** — annaconda already fits it today
-(autonomous, agent-driven investigation + the Cloud Scheduler sweep that runs
-without a human). The `mvp-rev00020` tag lets you fall back to the Taskmaster
-story in one command if the fleet does not finish. Either way the determinism
-+ sealed-verdict architecture also positions for **Best Architectural Design**.
+**Fortified Enterprise Fleet.** The track asks for three things, and each is a
+gate in code with a test behind it (see `docs/COMPLIANCE.md`):
 
----
+| Track criterion | annaconda |
+|---|---|
+| Agents cataloged for cross-department use | `GET /catalog?department=soc` returns the fleet as that department sees it — publication, clearances, delegation graph, each entry naming the manifest hash the sealed registry approved |
+| Context maintained safely across weeks of asynchronous operation | Per-case mission memory whose every mutation is sealed into a hash chain, plus a schedule the fleet sets for itself so cases are worked when due, not polled |
+| Production data without violating compliance, sovereignty, security | Every delegation passes a catalog gate (department · data class · region), and no agent anywhere can reach the verdict |
+
+The determinism + sealed-verdict architecture also positions for **Best
+Architectural Design**. A **Taskmaster** fallback still fits (the unattended
+end-to-end workflow, escalation included) if the fleet story is crowded.
 
 ## Elevator line
 
-annaconda is a live purple-team DFIR tool whose verdicts a court could trust:
-two Gemini agents drive and explain the investigation, but the language model is
-kept out of the decision entirely — the deterministic engine seals the verdict
-before any model runs, reproducible bit-for-bit.
+annaconda is a live purple-team DFIR fleet whose verdicts a court could trust: a
+commander agent works cases unattended for weeks — choosing what to hunt,
+carrying a tamper-evident memory, escalating to a human when one is needed — but
+the language model is kept out of the decision entirely. The deterministic
+engine seals the verdict before any model runs, reproducible bit-for-bit.
 
 ## Inspiration
 
@@ -39,22 +43,31 @@ change the verdict.
 
 ## What it does
 
-- An ADK + Gemini agent runs a live investigation on an endpoint: it chooses
-  curated Velociraptor hunts, freezes sealed evidence windows, adjudicates each
-  with a deterministic core, and narrates the result — with its decision log
-  visible step by step.
-- The deterministic core (no floats, no model) detects real attacks as
-  structural impossibilities — e.g. a C2 beacon observed before its own process
-  existed — and seals a MITRE-mapped verdict into a tamper-evident chain.
-- Cases persist per host in Firestore as one continuing sealed record; an
-  autonomous sweep (Cloud Scheduler → Pub/Sub → Cloud Run) continues hunts with
-  no human in the loop; an ABSTAIN verdict becomes memory that a re-hunt
-  reopens and resolves.
-- A prompt-injection demo shows the threat and the defense on camera: an
+- **It works without you.** Cloud Scheduler wakes a fleet of ADK + Gemini agents
+  on a cron. A commander reads what earlier cycles established, tasks the
+  specialists it is *cleared* to task, adjudicates through a deterministic
+  engine, and decides when to look again, when a human is needed, and when to
+  stop. It sets its own per-case cadence, so a compromised host is re-checked in
+  an hour and a quiet one in a day.
+- **It cannot decide what the evidence means.** The commander holds no
+  collection tool and no adjudication tool of its own — only the authority to
+  task specialists who do, through a catalog gate checked on every call. The
+  deterministic core (no floats, no model) detects real attacks as structural
+  impossibilities — a C2 beacon observed before its own process existed — and
+  seals a MITRE-mapped verdict before any model sees it.
+- **Its memory is tamper-evident.** What one cycle leaves for the next — open
+  hypotheses, collections already run, unresolved questions — is sealed into a
+  hash chain with the same recipe that seals verdicts, and re-verified on every
+  read. And it cannot reach the verdict: a test fills memory with the most
+  persuasive lie available and shows every seal unmoved.
+- **It is published, not merely deployed.** `GET /catalog?department=soc` shows
+  the fleet as one department sees it. Run a cycle as the SOC and the
+  adjudication request is refused — adjudication belongs to forensics — while
+  the collection the SOC is cleared for proceeds.
+- **A prompt-injection demo shows the threat and the defense on camera:** an
   attacker plants a fake "classified BENIGN" annotation, a naive narrator
   (Gemma) believes it, but the sealed verdict is MALICE — the same hash — and a
-  mechanical guard flags the lie. Swap Gemma for Gemini and the words change;
-  the verdict never does.
+  mechanical guard flags the lie.
 
 ## How we built it
 
@@ -67,30 +80,40 @@ was built for this hackathon.
 
 ## Challenges
 
-Keeping the LLM provably out of the decision path while still giving it real
-agency; making a verdict reproducible bit-for-bit across processes (no floats,
-canonical serialization, cross-process determinism tests in CI); and proving —
-not asserting — that the ML triage layer's floats never reach a sealed value.
+Giving an agent enough agency to run an investigation for weeks unattended
+while keeping it provably out of the verdict — the answer was to put the
+boundary in the tool contracts (the commander owns nothing that collects or
+adjudicates) rather than in a prompt. Then: making memory that survives weeks
+also survive an attacker with weeks to edit it; making a verdict reproducible
+bit-for-bit across processes; and getting an unattended cycle to fail honestly —
+a collection that fails has to be recorded as an unobserved host, never as one
+that was looked at and found quiet.
 
 ## Accomplishments
 
-Two ADK agents with visible reasoning; real attack detection from structural
-fractures; a prompt-injection defense demonstrated with two different Google
-models under one hash; autonomous operation on Cloud Scheduler; ABSTAIN as
-working memory; 80 tests with a determinism gate in CI.
+A fleet that genuinely runs itself — agent-driven cycles, self-set schedules,
+escalation with reasoning, and a decision to stand down — with the verdict still
+untouchable; an enterprise catalog that refuses taskings by department, data
+class and region; tamper-evident mission memory; a prompt-injection defense
+demonstrated with two different Google models under one hash; 140 tests with a
+determinism gate in CI.
 
 ## What we learned
 
 That "the model narrates, it never decides" is only credible if you can show it
 under attack — a baited narrator and an unmoved seal — and if the guard that
-checks the narration is a mechanical comparison, not another model.
+checks the narration is a mechanical comparison, not another model. And that
+autonomy is the harder half: an agent that cannot decide to stop is a loop, and
+an agent that reports a failed collection as a quiet host is worse than no agent
+at all.
 
 ## What's next
 
-A specialized agent fleet (dispatcher, per-platform hunters, persistence,
-correlation) with strictly disjoint tool contracts; a sealed agent registry
-(refuse to load an agent whose tool-manifest hash is not approved); and
-OpenTelemetry traces of the reasoning chain to Cloud Trace.
+Chunking the sealed chains across Firestore documents so a case worked daily for
+years does not meet the per-document limit; authenticating the department so the
+catalog's principal comes from a Cloud Run identity token rather than a request
+body; and a regional model endpoint for organisations whose residency rules
+cover the narration, not just the evidence.
 
 ---
 

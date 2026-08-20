@@ -21,6 +21,13 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+from agent.mission import (
+    load_mission, new_mission, note_open_question, resolve_open_question,
+)
+from service.chain_store import (
+    ConcurrentModificationError, SegmentedChain, new_index,
+)
+
 log = logging.getLogger("annaconda.case_store")
 
 # Worst-first ordering for the analyst queue: higher rank = needs attention.
@@ -39,6 +46,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _chain_count(case: dict, field: str) -> int:
+    """How many entries a chain holds, without loading it.
+
+    A segmented case carries only an index in its document, so the queue view
+    can be rendered from the case documents alone — listing every case must not
+    read every case's whole history."""
+    index = (case.get("chain_index") or {}).get(field)
+    if isinstance(index, dict) and "count" in index:
+        return int(index["count"])
+    return len(case.get(field, []))
+
+
 def _summarize(case: dict) -> dict:
     """The row an analyst scans in the fleet/queue view."""
     return {
@@ -47,10 +66,30 @@ def _summarize(case: dict) -> dict:
         "examiner_id": case.get("examiner_id"),
         "status": case.get("status", "open"),
         "worst_verdict": case.get("worst_verdict"),
-        "sealed_verdicts": len(case.get("entries", [])),
+        "sealed_verdicts": _chain_count(case, "entries"),
         "runs": case.get("runs", 0),
         "created_utc": case.get("created_utc"),
         "updated_utc": case.get("updated_utc"),
+        # What the fleet is doing with this case, so the queue shows unattended
+        # work in progress rather than just its last human-driven run.
+        "autonomy": _autonomy_summary(case.get("mission")),
+    }
+
+
+def _autonomy_summary(mission) -> dict:
+    """The fleet's state on one case, for the analyst queue."""
+    if not isinstance(mission, dict):
+        return {"cycles": 0, "next_due_utc": None, "escalated": False,
+                "standing_down": False, "open_questions": 0}
+    plan = mission.get("next_action") or {}
+    return {
+        "cycles": mission.get("cycles", 0),
+        "next_due_utc": plan.get("due_utc"),
+        "next_action": plan.get("action"),
+        "escalated": mission.get("escalation") is not None,
+        "standing_down": mission.get("standing_down") is not None,
+        "open_questions": sum(1 for q in mission.get("open_questions", [])
+                              if not q.get("resolved")),
     }
 
 
@@ -75,6 +114,13 @@ _ABSTAIN_MEMORY = {
 }
 
 
+def _mission_of(case: dict) -> dict:
+    """The case's mission, attached (and migrated) if it is not there yet."""
+    mission = load_mission(case)
+    case["mission"] = mission
+    return mission
+
+
 def _update_open_question(case: dict, verdicts: list) -> None:
     """Turn ABSTAIN into memory and reentry. Opens a question when a run cannot
     conclude; resolves it when a later run reaches a definitive verdict."""
@@ -92,10 +138,22 @@ def _update_open_question(case: dict, verdicts: list) -> None:
             "opened_at_run": case.get("runs", 0), "resolved": False,
             "resolved_at_run": None, "resolved_verdict": None,
         }
+        # The fleet reads mission memory, not this field: an ABSTAIN that only
+        # existed here would be invisible to the next autonomous cycle, which
+        # would then re-collect blind instead of pursuing the missing evidence.
+        note_open_question(_mission_of(case), actor="adjudication",
+                           question=f"{abstained}: {why}",
+                           what_would_resolve=resolves)
     elif concluded and q is not None and not q.get("resolved"):
         q["resolved"] = True
         q["resolved_at_run"] = case.get("runs", 0)
         q["resolved_verdict"] = concluded
+        mission = _mission_of(case)
+        for mq in mission.get("open_questions", []):
+            if not mq.get("resolved") and mq["question"].startswith(q["state"]):
+                resolve_open_question(
+                    mission, actor="adjudication", question_id=mq["id"],
+                    how=f"a later run reached {concluded}")
         # Reflect the conclusion the reentry reached — but NEVER downgrade a case
         # that already has a worse verdict in its history. A case whose worst is
         # MALICE must never display "benign" just because a later partial
@@ -144,13 +202,17 @@ class MemoryCaseStore:
         self._cases: dict[str, dict] = {}
 
     def create_case(self, case_id: str, host: dict, examiner_id: str,
-                    demo: bool = False) -> dict:
+                    demo: bool = False, scenario: str = "benign") -> dict:
         case = {
             "case_id": case_id, "host": host, "examiner_id": examiner_id,
             "created_utc": _now(), "updated_utc": _now(),
             "status": "open", "worst_verdict": None,
             "entries": [], "verdicts": [], "audit_trail": [], "runs": 0,
             "open_question": None, "demo": demo,
+            # Which bundled telemetry this host reports, so an unattended cycle
+            # replays the same host it replayed last time.
+            "scenario": scenario,
+            "mission": new_mission(case_id),
         }
         self._cases[case_id] = case
         return case
@@ -172,6 +234,49 @@ class MemoryCaseStore:
         _apply_run(case, entries, verdicts, audit)
         return case
 
+    def save_mission(self, case_id: str, mission: dict) -> None:
+        self._cases[case_id]["mission"] = mission
+
+    def apply_cycle(self, case_id: str, entries, verdicts, audit,
+                    mission: dict) -> dict:
+        case = self._cases[case_id]
+        case["mission"] = mission
+        if verdicts:
+            _apply_run(case, entries, verdicts, audit)
+        else:
+            case["updated_utc"] = _now()
+        return case
+
+
+# The four lists that grow without bound on a long-running case. They are
+# stored in bounded segment documents (service/chain_store.py) rather than
+# inside the case document, which would meet Firestore's 1 MiB limit after
+# roughly 270 cycles — about eleven days on a host re-checked hourly.
+# "journal" lives inside the mission; the rest are top level.
+_CHAINED = ("entries", "verdicts", "audit_trail", "journal")
+
+
+def _split_chains(case: dict) -> tuple:
+    """Separate a whole case into (document, chains-by-field).
+
+    The document is what goes in cases/{id}; the chains are appended to their
+    segments. The case dict itself is not modified — callers keep working with
+    the assembled view.
+    """
+    doc = dict(case)
+    mission = dict(doc.get("mission") or {})
+    chains = {
+        "entries": list(doc.get("entries", [])),
+        "verdicts": list(doc.get("verdicts", [])),
+        "audit_trail": list(doc.get("audit_trail", [])),
+        "journal": list(mission.get("journal", [])),
+    }
+    for field in ("entries", "verdicts", "audit_trail"):
+        doc[field] = []
+    mission["journal"] = []
+    doc["mission"] = mission
+    return doc, chains
+
 
 class FirestoreCaseStore:
     backend = "firestore"
@@ -184,26 +289,118 @@ class FirestoreCaseStore:
         # factory can degrade to memory rather than crash on first request.
         next(iter(self._col.limit(1).stream()), None)
 
+    # -- segment plumbing --------------------------------------------------
+
+    def _segments(self, case_id: str):
+        """A minimal document-collection view over this case's segments."""
+        col = self._col.document(case_id).collection("chain")
+
+        class _Collection:
+            @staticmethod
+            def read(doc_id):
+                snap = col.document(doc_id).get()
+                return snap.to_dict() if snap.exists else None
+
+            @staticmethod
+            def write(doc_id, data):
+                col.document(doc_id).set(data)
+
+            @staticmethod
+            def ids():
+                return [d.id for d in col.list_documents()]
+
+            @staticmethod
+            def delete(doc_id):
+                col.document(doc_id).delete()
+
+        return _Collection
+
+    def _append_chains(self, case_id: str, index: dict, chains: dict) -> dict:
+        """Append each chain's NEW entries and return the updated index."""
+        collection = self._segments(case_id)
+        updated = dict(index or {})
+        # Check every chain BEFORE writing any of them. A divergence found half
+        # way through would leave segments written that no index references —
+        # one logical operation must not land in pieces.
+        for field in _CHAINED:
+            SegmentedChain(collection, field).check(
+                updated.get(field) or new_index(), chains.get(field, []))
+        for field in _CHAINED:
+            updated[field] = SegmentedChain(collection, field).append_from(
+                updated.get(field) or new_index(), chains.get(field, []))
+        return updated
+
+    def _assemble(self, case: dict) -> dict:
+        """Put the segmented chains back, so every caller and every verifier
+        sees one unbroken history exactly as before segmentation.
+
+        A field with no index has never been segmented — which is exactly the
+        shape of every case written before segmentation existed, with its
+        chains still inline in the document. Reading those from segments would
+        return nothing and *replace* the real history with an empty list, so a
+        deploy would erase the sealed chain of every case already in the
+        database. A field without an index is therefore left exactly as stored,
+        and the next write migrates it into segments.
+        """
+        collection = self._segments(case["case_id"])
+        index = case.get("chain_index") or {}
+        for field in ("entries", "verdicts", "audit_trail"):
+            if field in index:
+                case[field] = SegmentedChain(collection, field).read_all(
+                    index[field])
+        mission = case.get("mission")
+        if isinstance(mission, dict) and "journal" in index:
+            mission["journal"] = SegmentedChain(collection, "journal").read_all(
+                index["journal"])
+        return case
+
+    def _persist(self, case: dict) -> None:
+        doc, chains = _split_chains(case)
+        doc["chain_index"] = self._append_chains(
+            case["case_id"], case.get("chain_index") or {}, chains)
+        self._col.document(case["case_id"]).set(doc)
+        # Keep the in-hand case consistent with what is stored, so a caller
+        # that persists twice in one request appends only what is new.
+        case["chain_index"] = doc["chain_index"]
+
+    # -- store interface ---------------------------------------------------
+
     def create_case(self, case_id: str, host: dict, examiner_id: str,
-                    demo: bool = False) -> dict:
+                    demo: bool = False, scenario: str = "benign") -> dict:
         case = {
             "case_id": case_id, "host": host, "examiner_id": examiner_id,
             "created_utc": _now(), "updated_utc": _now(),
             "status": "open", "worst_verdict": None,
             "entries": [], "verdicts": [], "audit_trail": [], "runs": 0,
             "open_question": None, "demo": demo,
+            # Which bundled telemetry this host reports, so an unattended cycle
+            # replays the same host it replayed last time.
+            "scenario": scenario,
+            "mission": new_mission(case_id),
+            "chain_index": {},
         }
-        self._col.document(case_id).set(case)
+        self._persist(case)
         return case
 
     def get_case(self, case_id: str) -> Optional[dict]:
         snap = self._col.document(case_id).get()
-        return snap.to_dict() if snap.exists else None
+        if not snap.exists:
+            return None
+        return self._assemble(snap.to_dict())
 
     def delete_case(self, case_id: str) -> None:
+        snap = self._col.document(case_id).get()
+        if snap.exists:
+            case = snap.to_dict()
+            collection = self._segments(case_id)
+            index = case.get("chain_index") or {}
+            for field in _CHAINED:
+                SegmentedChain(collection, field).delete_all(index.get(field))
         self._col.document(case_id).delete()
 
     def list_cases(self) -> list[dict]:
+        # Deliberately not assembled: the queue is rendered from the case
+        # documents alone, so listing cases does not read every case's history.
         rows = [_summarize(s.to_dict()) for s in self._col.stream()]
         rows.sort(key=lambda r: (verdict_rank(r["worst_verdict"]),
                                  r["updated_utc"] or ""), reverse=True)
@@ -214,7 +411,41 @@ class FirestoreCaseStore:
         if case is None:
             raise KeyError(case_id)
         _apply_run(case, entries, verdicts, audit)
-        self._col.document(case_id).set(case)
+        self._persist(case)
+        return case
+
+    def save_mission(self, case_id: str, mission: dict) -> None:
+        """Persist the fleet's working memory on its own, for a caller that
+        changed only the memory. A cycle that also sealed verdicts must use
+        apply_cycle instead — see the note there."""
+        case = self.get_case(case_id)
+        if case is None:
+            raise KeyError(case_id)
+        case["mission"] = mission
+        self._persist(case)
+
+    def apply_cycle(self, case_id: str, entries, verdicts, audit,
+                    mission: dict) -> dict:
+        """Persist one cycle's sealed output and its memory in a single write.
+
+        Why this exists rather than apply_run followed by save_mission: each of
+        those re-reads the stored case, so the run's own memory mutations (the
+        ABSTAIN question _apply_run opens, say) land on a *different* mission
+        object than the one the cycle reasoned into. Two objects appending to
+        one hash chain produce a broken chain — the entries written second
+        chain onto a head the entries written first never had. Attaching the
+        cycle's mission before applying the run keeps it to one object, one
+        chain, one write.
+        """
+        case = self.get_case(case_id)
+        if case is None:
+            raise KeyError(case_id)
+        case["mission"] = mission
+        if verdicts:
+            _apply_run(case, entries, verdicts, audit)
+        else:
+            case["updated_utc"] = _now()
+        self._persist(case)
         return case
 
 

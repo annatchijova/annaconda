@@ -4,133 +4,119 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>annaconda — Case Queue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/app.css">
 <style>
-  :root{
-    --paper:#eef0f1;--paper-deep:#e4e7e8;--card:#f7f8f8;
-    --ink:#191d21;--ink-soft:#5a646c;--ink-faint:#8b949a;
-    --hairline:#c9d0d2;--hairline-2:#dbe0e1;
-    --legal:#23425e;--seal:#9e2b1e;--seal-deep:#7e2016;--sealed:#2e664b;--amber:#8a6410;
-    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
-  }
-  *{box-sizing:border-box;}
-  body{margin:0;background:radial-gradient(130% 90% at 50% -8%,#f5f6f7 0%,var(--paper) 40%,var(--paper-deep) 100%);
-    color:var(--ink);font-family:var(--serif);line-height:1.55;-webkit-font-smoothing:antialiased;
-    padding:clamp(1rem,4vw,2.5rem) 1rem 3rem;}
-  .wrap{max-width:1080px;margin:0 auto;}
-  nav.top{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;}
-  nav.top .brand{font-family:var(--sans);font-weight:700;letter-spacing:.12em;font-size:.9rem;}
-  nav.top .brand span{color:var(--legal);}
-  nav.top a{font-family:var(--sans);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--legal);
-    text-decoration:none;border:1px solid var(--hairline);border-radius:4px;padding:.5rem .9rem;background:#fff;margin-left:.4rem;}
-  nav.top a:hover{background:#eef1f4;}
-  .persist{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);}
-  .persist b{color:var(--sealed);}
-  .persist b.mem{color:var(--amber);}
+  .page { max-width: var(--maxw); margin: 0 auto; padding: clamp(1.4rem,4vw,2.4rem) clamp(1rem,4vw,2rem) 3rem; }
+  .persist { font-family: var(--mono); font-size: .7rem; color: var(--ink-faint); }
+  .persist b { color: var(--benign); } .persist b.mem { color: var(--abstain); }
 
-  h1{font-size:clamp(1.6rem,4vw,2.2rem);font-weight:600;letter-spacing:-.012em;margin:0 0 .3rem;}
-  .lede{color:var(--ink-soft);margin:0 0 1.6rem;max-width:60ch;}
+  .grid { display: grid; grid-template-columns: 1.15fr 1fr; gap: 1.3rem; align-items: start; margin-top: 1.6rem; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
 
-  .grid{display:grid;grid-template-columns:1.15fr 1fr;gap:1.4rem;align-items:start;}
-  @media(max-width:820px){.grid{grid-template-columns:1fr;}}
+  /* panels here inject their own <h2> header bar (JS rebuilds detail) */
+  .panel > h2 { font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 0; padding: .8rem 1.1rem; border-bottom: 1px solid var(--line); background: var(--card-2); }
 
-  .panel{background:var(--card);border:1px solid var(--hairline);border-radius:6px;overflow:hidden;}
-  .panel > h2{font-family:var(--sans);font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-soft);
-    margin:0;padding:.9rem 1.1rem;border-bottom:1px solid var(--hairline);background:linear-gradient(var(--card),#eef1f1);}
+  button.primary { background: var(--cyan); color: #fff; border-color: transparent; }
+  button.primary:hover { background: var(--cyan-deep); }
+  button.ghost { background: var(--card); color: var(--cyan-deep); border-color: var(--line); }
+  button.ghost:hover { background: var(--card-2); border-color: var(--cyan); }
+  button.danger { background: var(--malice); color: #fff; border-color: transparent; }
+  button.danger:hover { background: var(--malice-deep); }
 
-  /* queue */
-  .qrow{display:grid;grid-template-columns:auto 1fr auto;gap:.8rem;align-items:center;
-    padding:.75rem 1.1rem;border-bottom:1px solid var(--hairline-2);cursor:pointer;transition:background .12s;width:100%;text-align:left;
-    border-left:0;border-right:0;border-top:0;background:none;font-family:inherit;}
-  .qrow:hover{background:rgba(35,66,94,.05);}
-  .qrow[aria-selected="true"]{background:rgba(35,66,94,.09);}
-  .qrow:last-child{border-bottom:0;}
-  .pill{font-family:var(--sans);font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
-    padding:.28rem .5rem;border-radius:3px;color:#fff;white-space:nowrap;}
-  .pill.malice{background:var(--seal);} .pill.benign{background:var(--sealed);}
-  .pill.abstain{background:var(--amber);} .pill.escalate{background:#6d3a86;} .pill.open{background:var(--ink-faint);}
-  .qrow .cid{font-family:var(--mono);font-size:.86rem;color:var(--ink);}
-  .qrow .host{font-size:.82rem;color:var(--ink-soft);}
-  .qrow .meta{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);text-align:right;font-variant-numeric:tabular-nums;}
-  .empty{padding:1.6rem 1.1rem;color:var(--ink-faint);font-style:italic;}
+  .create { padding: 1rem 1.1rem; border-bottom: 1px solid var(--line); display: flex; gap: .5rem; flex-wrap: wrap; align-items: flex-end; }
+  .create .f { display: flex; flex-direction: column; gap: .3rem; }
+  .create input { width: 8.6rem; }
 
-  /* create */
-  .create{padding:1rem 1.1rem;border-bottom:1px solid var(--hairline);display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-end;}
-  .create .f{display:flex;flex-direction:column;gap:.25rem;}
-  .create label{font-family:var(--sans);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);}
-  .create input{font-family:var(--mono);font-size:.8rem;padding:.45rem .55rem;border:1px solid var(--hairline);border-radius:3px;background:#fff;width:8.5rem;}
-  button{appearance:none;cursor:pointer;font-family:var(--sans);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;
-    border:0;border-radius:4px;padding:.55rem 1rem;transition:background .16s,opacity .16s;}
-  button.primary{background:var(--legal);color:#fff;} button.primary:hover{background:#16324a;}
-  button.ghost{background:#fff;color:var(--legal);border:1px solid var(--hairline);} button.ghost:hover{background:#eef1f4;}
-  button.danger{background:var(--seal);color:#fff;} button.danger:hover{background:var(--seal-deep);}
-  button[disabled]{opacity:.5;cursor:default;}
+  .qrow { display: grid; grid-template-columns: auto 1fr auto; gap: .8rem; align-items: center;
+    padding: .75rem 1.1rem; border-bottom: 1px solid var(--line-2); cursor: pointer; transition: background .12s;
+    width: 100%; text-align: left; border-left: 0; border-right: 0; border-top: 0; background: none; }
+  .qrow:hover { background: var(--cyan-wash); }
+  .qrow[aria-selected="true"] { background: var(--cyan-wash); box-shadow: inset 3px 0 0 var(--cyan); }
+  .qrow:last-child { border-bottom: 0; }
+  .qrow .cid { font-family: var(--mono); font-size: .86rem; color: var(--ink); }
+  .qrow .host { font-family: var(--sans); font-size: .8rem; color: var(--ink-soft); }
+  .qrow .meta { font-family: var(--mono); font-size: .7rem; color: var(--ink-faint); text-align: right; font-variant-numeric: tabular-nums; }
+  #queue .empty, .placeholder { padding: 1.8rem 1.2rem; color: var(--ink-faint); font-style: italic; }
+  .placeholder { text-align: center; }
 
-  /* detail */
-  #detail{min-height:8rem;}
-  .dhead{padding:1.1rem 1.2rem;border-bottom:1px solid var(--hairline);}
-  .dhead .cid{font-family:var(--mono);font-size:1.1rem;color:var(--ink);}
-  .dmeta{font-family:var(--mono);font-size:.74rem;color:var(--ink-soft);margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.3rem 1.2rem;}
-  .dmeta b{color:var(--ink);}
-  .chainok{font-family:var(--sans);font-size:.72rem;margin-top:.6rem;}
-  .chainok.ok{color:var(--sealed);} .chainok.bad{color:var(--seal);}
-  .oq{padding:.9rem 1.2rem;background:#f7f2e8;border-bottom:1px solid var(--hairline);border-left:4px solid var(--amber);font-size:.9rem;line-height:1.5;color:var(--ink);}
-  .oq b{color:var(--amber);}
-  .oq .oqres{margin-top:.5rem;}
-  .oq .oqmem{margin-top:.4rem;font-size:.8rem;color:var(--ink-soft);font-style:italic;}
-  .oq.resolved{background:#eef4f0;border-left-color:var(--sealed);}
-  .oq.resolved b{color:var(--sealed);}
-  .actions{padding:.9rem 1.2rem;border-bottom:1px solid var(--hairline);display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;background:#fbfcfc;}
-  .actions .spin{font-family:var(--mono);font-size:.72rem;color:var(--amber);margin-left:auto;}
-  .verdicts{padding:.6rem 0;}
-  .vrow{display:grid;grid-template-columns:auto 1fr auto;gap:.7rem;align-items:center;padding:.55rem 1.2rem;border-bottom:1px solid var(--hairline-2);}
-  .vrow:last-child{border-bottom:0;}
-  .vrow .seq{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);}
-  .vrow .st{font-family:var(--sans);font-size:.82rem;font-weight:600;}
-  .vrow .st.malice{color:var(--seal);} .vrow .st.benign{color:var(--sealed);} .vrow .st.other{color:var(--legal);}
-  .vrow .ttp{font-family:var(--mono);font-size:.72rem;color:var(--seal);}
-  .vrow .h{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);text-align:right;}
-  .placeholder{padding:2rem 1.2rem;color:var(--ink-faint);font-style:italic;text-align:center;}
-  .foot{margin-top:1.4rem;font-family:var(--sans);font-size:.66rem;color:var(--ink-faint);text-align:center;}
-  @media(prefers-reduced-motion:reduce){*{animation:none!important;}}
+  .dhead { padding: 1.1rem 1.2rem; border-bottom: 1px solid var(--line); }
+  .dhead .cid { font-family: var(--mono); font-size: 1.15rem; color: var(--ink); }
+  .dmeta { font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; color: var(--ink-faint); margin-top: .6rem;
+    display: flex; flex-wrap: wrap; gap: .3rem 1.3rem; }
+  .dmeta b { color: var(--ink); font-weight: 500; }
+  .chainok { font-family: var(--mono); font-size: .72rem; margin-top: .7rem; }
+  .chainok.ok { color: var(--benign); } .chainok.bad { color: var(--malice); }
+
+  .oq { padding: .9rem 1.2rem; background: var(--abstain-wash); border-bottom: 1px solid var(--line);
+    border-left: 4px solid var(--abstain); font-size: .88rem; line-height: 1.55; color: var(--ink); }
+  .oq b { color: var(--abstain); }
+  .oq .oqres { margin-top: .5rem; } .oq .oqmem { margin-top: .4rem; font-size: .8rem; color: var(--ink-soft); font-style: italic; }
+  .oq.resolved { background: var(--benign-wash); border-left-color: var(--benign); }
+  .oq.resolved b { color: var(--benign); }
+
+  .actions { padding: .9rem 1.2rem; border-bottom: 1px solid var(--line); display: flex; gap: .5rem; flex-wrap: wrap;
+    align-items: center; background: var(--card-2); }
+  .actions .spin { font-family: var(--mono); font-size: .72rem; color: var(--abstain); margin-left: auto; }
+
+  .verdicts { padding: .5rem 0; }
+  .vrow { display: grid; grid-template-columns: auto 1fr auto; gap: .7rem; align-items: center;
+    padding: .6rem 1.2rem; border-bottom: 1px solid var(--line-2); }
+  .vrow:last-child { border-bottom: 0; }
+  .vrow .seq { font-family: var(--mono); font-size: .7rem; color: var(--ink-faint); }
+  .vrow .st { font-family: var(--mono); font-size: .82rem; font-weight: 600; }
+  .vrow .st.malice { color: var(--malice); } .vrow .st.benign { color: var(--benign); } .vrow .st.other { color: var(--cyan-deep); }
+  .vrow .ttp { font-family: var(--mono); font-size: .72rem; color: var(--cyan-deep); }
+  .vrow .h { font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); text-align: right; }
+
+  .foot-note { margin-top: 1.4rem; font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); text-align: center; }
 </style>
 </head>
-<body>
-<div class="wrap">
-  <nav class="top">
-    <div class="brand">annaconda<span>.</span></div>
-    <div>
+<body class="grid-bg">
+  <nav class="nav"><div class="nav-in">
+    <a class="brand" href="/">annaconda<span class="dot">.</span></a>
+    <div class="row">
       <span class="persist" id="persist"></span>
-      <a href="/">Home</a>
-      <a href="/exhibit">Exhibit</a>
-      <a href="/consult">Mentor</a>
-    </div>
-  </nav>
-
-  <h1>Case queue</h1>
-  <p class="lede">One case per host. Verdicts accumulate into a single sealed record that reopens, hands off, and defends later. Cases that need attention rise to the top.</p>
-
-  <div class="grid">
-    <div class="panel">
-      <h2>Cases &middot; worst first</h2>
-      <div class="create">
-        <div class="f"><label>Case id</label><input id="cId" value="IR-2026-001" spellcheck="false"></div>
-        <div class="f"><label>Host</label><input id="cHost" value="FINANCE-WS-04" spellcheck="false"></div>
-        <div class="f"><label>Examiner</label><input id="cExam" value="perito-01" spellcheck="false"></div>
-        <button class="primary" id="createBtn">Open case</button>
-        <button class="ghost" id="resetBtn" title="Reset the showcase cases to a clean state">Reset demo</button>
+      <div class="nav-links">
+        <a href="/console">Case queue</a>
+        <a href="/fleet-console">Fleet</a>
+        <a href="/exhibit">Exhibit</a>
+        <a href="/consult">Mentor</a>
+        <a href="/architecture">Architecture</a>
       </div>
-      <div id="queue"><div class="empty">Loading…</div></div>
+      <button class="theme" aria-label="Toggle dark mode" title="Toggle theme">◐</button>
     </div>
+  </div></nav>
 
-    <div class="panel" id="detail">
-      <h2>Case detail</h2>
-      <div class="placeholder">Select a case to review its sealed record, or investigate its host.</div>
+  <div class="page">
+    <span class="eyebrow">The analyst workflow</span>
+    <h1>Case queue</h1>
+    <p class="lede">One case per host. Verdicts accumulate into a single sealed record that reopens,
+    hands off, and defends later. Cases that need attention rise to the top.</p>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>Cases · worst first</h2>
+        <div class="create">
+          <div class="f"><label class="field">Case id</label><input id="cId" value="IR-2026-001" spellcheck="false"></div>
+          <div class="f"><label class="field">Host</label><input id="cHost" value="FINANCE-WS-04" spellcheck="false"></div>
+          <div class="f"><label class="field">Examiner</label><input id="cExam" value="perito-01" spellcheck="false"></div>
+          <button class="primary" id="createBtn">Open case</button>
+          <button class="ghost" id="resetBtn" title="Reset the showcase cases to a clean state">Reset demo</button>
+        </div>
+        <div id="queue"><div class="empty">Loading…</div></div>
+      </div>
+
+      <div class="panel" id="detail">
+        <h2>Case detail</h2>
+        <div class="placeholder">Select a case to review its sealed record, or investigate its host.</div>
+      </div>
     </div>
+    <p class="foot-note">Every verdict is produced and sealed by the deterministic engine. The record is tamper-evident: reordered, altered, or truncated and it fails verification.</p>
   </div>
-  <p class="foot">Every verdict is produced and sealed by the deterministic engine. The record is tamper-evident: reordered, altered, or truncated and it fails verification.</p>
-</div>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -242,5 +228,6 @@ $("resetBtn").onclick=async()=>{
 
 loadQueue();
 </script>
+<script src="/assets/nav.js"></script>
 </body>
 </html>

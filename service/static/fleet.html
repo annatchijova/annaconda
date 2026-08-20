@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>annaconda — Autonomous Fleet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/app.css">
+<style>
+  .page { max-width: var(--maxw); margin: 0 auto; padding: clamp(1.4rem,4vw,2.4rem) clamp(1rem,4vw,2rem) 3rem; }
+  .panel { margin-bottom: 1.3rem; }
+  .controls { display: flex; gap: .7rem; flex-wrap: wrap; align-items: flex-end;
+    padding: 1rem 1.1rem; border-bottom: 1px solid var(--line); }
+  .region { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); align-self: center; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  th { font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-faint); text-align: left; padding: .6rem .7rem; border-bottom: 1px solid var(--line); }
+  td { padding: .6rem .7rem; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+  td.name { font-family: var(--mono); font-size: .78rem; color: var(--ink); white-space: nowrap; }
+  td.hash { font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); }
+
+  /* fleet-log rows */
+  .step { display: grid; grid-template-columns: 9.5rem 1fr; gap: .8rem; align-items: start;
+    padding: .55rem .2rem; border-bottom: 1px solid var(--line-2); }
+  .step:last-child { border-bottom: 0; }
+  .role { font-family: var(--mono); font-size: .6rem; letter-spacing: .08em; text-transform: uppercase;
+    color: #fff; background: var(--ink-soft); border-radius: 3px; padding: .24rem .4rem; height: fit-content; text-align: center; }
+  .role.hunter { background: var(--ink-soft); }
+  .role.correlator { background: var(--benign); }
+  .role.commander { background: var(--cyan); }
+  .role.refused { background: var(--malice); }
+  .what { font-size: .86rem; color: var(--ink); }
+  .what .act { font-family: var(--mono); font-size: .74rem; color: var(--cyan-deep); }
+  .what .dt { color: var(--ink-soft); font-size: .82rem; }
+  .verdict { font-family: var(--mono); font-weight: 600; color: var(--malice); }
+  .verdict.benign { color: var(--benign); } .verdict.abstain { color: var(--abstain); }
+  .flag { display: inline-block; font-family: var(--mono); font-size: .62rem; letter-spacing: .02em;
+    color: var(--malice-deep); background: var(--malice-wash); border: 1px solid var(--malice);
+    border-radius: 3px; padding: .1rem .4rem; margin-left: .3rem; }
+
+  .ok { color: var(--benign); font-weight: 600; }
+  .bad { color: var(--malice); font-weight: 600; }
+  .dt { color: var(--ink-soft); }
+
+  .escal { border-left: 3px solid var(--line); padding: .5rem 0 .55rem .8rem; margin: .45rem 0; }
+  .escal.current { border-left-color: var(--malice); }
+  .escal.done { opacity: .62; border-left-color: var(--benign); }
+  .escal button.ack { margin-top: .4rem; padding: .38rem .7rem; font-size: .62rem; }
+
+  .err { margin-top: .8rem; }
+  .kv { grid-template-columns: 11rem 1fr; }
+</style>
+</head>
+<body class="grid-bg">
+  <nav class="nav"><div class="nav-in">
+    <a class="brand" href="/">annaconda<span class="dot">.</span></a>
+    <div class="row">
+      <div class="nav-links">
+        <a href="/console">Case queue</a>
+        <a href="/fleet-console">Fleet</a>
+        <a href="/exhibit">Exhibit</a>
+        <a href="/consult">Mentor</a>
+        <a href="/architecture">Architecture</a>
+      </div>
+      <button class="theme" aria-label="Toggle dark mode" title="Toggle theme">◐</button>
+    </div>
+  </div></nav>
+
+  <div class="page">
+    <span class="eyebrow">Autonomous operation</span>
+    <h1>The fleet, working with nobody watching</h1>
+    <p class="lede">Cloud Scheduler wakes the fleet on a cron. The commander reads what earlier cycles
+    found, tasks the specialists it is <b>cleared</b> to task, and decides when to look again, when a
+    human is needed, and when to stop. What it cannot do is decide what the evidence means — the
+    verdict comes back <span class="claim">sealed</span> from the deterministic engine. Run a cycle
+    and watch exactly what happens at 3am.</p>
+
+    <div class="panel" style="margin-top:1.6rem">
+      <header><span class="title">Enterprise catalog</span><span class="note">who may task what, over what data</span></header>
+      <div class="controls">
+        <div><label class="field" for="dept-view">Viewing as department</label>
+          <select id="dept-view"><option value="">— the whole fleet —</option></select></div>
+        <span class="region" id="region"></span>
+      </div>
+      <div class="scroll-x">
+        <table id="catalog"><thead><tr>
+          <th>Agent</th><th>Purpose</th><th>Cleared for</th><th>Delegates to</th><th>Manifest</th>
+        </tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <header><span class="title">Run one autonomous cycle</span><span class="note">the same code path the cron runs</span></header>
+      <div class="controls">
+        <div><label class="field" for="case-id">Case</label><select id="case-id"></select></div>
+        <div><label class="field" for="dept-run">Running as</label><select id="dept-run"></select></div>
+        <button class="btn btn-primary" id="run">Run a cycle</button>
+        <button class="btn btn-ghost" id="seed">Reset demo cases</button>
+      </div>
+      <div class="body"><div id="cycle-out" class="empty">No cycle run yet.</div></div>
+    </div>
+
+    <div class="panel">
+      <header><span class="title">Mission memory</span><span class="note">what survives to the next cycle — chain-verified</span></header>
+      <div class="body"><div id="mission-out" class="empty">Run a cycle to see the case's memory.</div></div>
+    </div>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function jget(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+async function jpost(url, body){
+  const r = await fetch(url, {method:"POST", headers:{"content-type":"application/json"},
+                              body: JSON.stringify(body||{})});
+  if(!r.ok) throw new Error((await r.json().catch(()=>({detail:r.statusText}))).detail || r.statusText);
+  return r.json();
+}
+
+function roleClass(role, action){
+  if(action === "refused_by_catalog") return "refused";
+  if(role === "correlator") return "correlator";
+  if(role === "fleet-commander") return "commander";
+  return "hunter";
+}
+
+function verdictClass(state){
+  if(!state) return "";
+  if(state.startsWith("BENIGN")) return "benign";
+  if(state.startsWith("ABSTAIN")) return "abstain";
+  return "";
+}
+
+function describe(e){
+  switch(e.action){
+    case "read_mission_brief":
+      return `read the case's memory — <span class="dt">${e.cycles_so_far} cycle(s) so far, ${e.open_lines} open line(s) of inquiry</span>`;
+    case "collect":
+      return `froze a sealed evidence window — <span class="dt">${esc(e.reason||"")} (${e.artifacts} artifacts)</span>`;
+    case "adjudicate":
+      return `sealed verdict <span class="verdict ${verdictClass(e.verdict_state)}">${esc(e.verdict_state)}</span>` +
+             (e.mitre_techniques && e.mitre_techniques.length
+               ? ` <span class="dt">· ${e.mitre_techniques.map(esc).join(", ")}</span>` : "");
+    case "refused_by_catalog":
+      return `<b>refused by the catalog</b> — <span class="dt">${esc(e.detail)}</span>`;
+    case "open_line_of_inquiry":
+      return `opened ${esc(e.id)} — <span class="dt">${esc(e.text)}</span>`;
+    case "settle_line_of_inquiry":
+      return `${esc(e.status)} ${esc(e.id)} — <span class="dt">${esc(e.rationale)}</span>`;
+    case "schedule_next_cycle":
+      return `scheduled the next cycle for <span class="mono">${esc(e.due_utc)}</span> — <span class="dt">${esc(e.why)}</span>`;
+    case "escalate_to_human": {
+      const flags = [];
+      if(e.unsupported_by_seal) flags.push("rests on no sealed verdict");
+      if(e.unsealed_verdict_claims && e.unsealed_verdict_claims.length)
+        flags.push(`names ${e.unsealed_verdict_claims.map(esc).join(", ")}, never sealed`);
+      return `<b>escalated to a human</b> — <span class="dt">${esc(e.why)}. Check: ${esc(e.what_to_check)}</span>` +
+             (flags.length ? ` <span class="flag">⚠ ${flags.join(" · ")}</span>` : "");
+    }
+    case "narration_unsupported":
+      return `<b>narration checked against the seal</b> — <span class="dt">${esc(e.detail)}</span>`;
+    case "stand_down":
+      return `<b>stood down</b> — <span class="dt">${esc(e.rationale)}</span>`;
+    case "agent_turn_failed":
+      return `the model turn failed, falling back — <span class="dt">${esc(e.detail)}</span>`;
+    case "default_schedule_applied":
+      return `<span class="dt">${esc(e.detail)}</span>`;
+    default:
+      return `<span class="act">${esc(e.action)}</span> <span class="dt">${esc(JSON.stringify(
+        Object.fromEntries(Object.entries(e).filter(([k]) => !["role","action"].includes(k)))))}</span>`;
+  }
+}
+
+function renderCycle(body){
+  const c = body.cycle;
+  if(!c.acted){
+    $("cycle-out").innerHTML =
+      `<p class="empty">The fleet skipped this case: <b>${esc(c.reason)}</b>` +
+      (c.next_action ? ` — it scheduled itself for <span class="mono">${esc(c.next_action.due_utc)}</span>.` : ".") +
+      ` That is the fleet pacing itself, not an error.</p>`;
+    return;
+  }
+  const planner = c.planner === "gemini"
+    ? `<span class="ok">Gemini commander</span>`
+    : `<span class="mono">deterministic fallback</span> <span class="dt">(no model reachable — this is the rule-based planner, not agent reasoning)</span>`;
+  const steps = c.fleet_log.map(e => `
+    <div class="step">
+      <span class="role ${roleClass(e.role, e.action)}">${esc(e.role)}</span>
+      <span class="what">${describe(e)}</span>
+    </div>`).join("");
+  $("cycle-out").innerHTML = `
+    <dl class="kv">
+      <dt>Cycle</dt><dd class="mono">#${c.cycle}, running as ${esc(c.department)}</dd>
+      <dt>Principal</dt><dd>${c.principal
+        ? (c.principal.authenticated
+            ? `<span class="ok">verified</span> <span class="mono">${esc(c.principal.identity)}</span>`
+            : `<span class="mono">asserted</span> <span class="dt">— ${esc(c.principal.how)}</span>`)
+        : `<span class="empty">not recorded</span>`}</dd>
+      <dt>Planner</dt><dd>${planner}</dd>
+      <dt>Case status</dt><dd class="mono">${esc(body.status)} · ${body.sealed_verdicts_total} sealed verdict(s) total</dd>
+      <dt>Memory chain</dt><dd>${c.memory.memory_ok
+        ? `<span class="ok">verified</span> <span class="dt">(${c.memory.journal_entries} entries)</span>`
+        : `<span class="bad">BROKEN</span>`}</dd>
+      <dt>Narration vs seal</dt><dd>${(c.unsealed_verdict_claims || []).length
+        ? `<span class="bad">names ${c.unsealed_verdict_claims.map(esc).join(", ")}</span> <span class="dt">— not sealed by this cycle</span>`
+        : `<span class="ok">no verdict claimed that was not sealed</span>`}</dd>
+    </dl>
+    <div style="margin-top:1rem">${steps}</div>`;
+}
+
+function renderEscalation(e, i, m){
+  const current = m.escalation &&
+    m.escalation.raised_utc === e.raised_utc && m.escalation.why === e.why;
+  const basis = (e.sealed_basis || []).length
+    ? `<div class="dt">resting on ${e.sealed_basis.map(b =>
+        `<span class="mono">${esc(b.verdict_state)}</span> <span class="mono">${esc((b.entry_hash||"").slice(0,12))}…</span>`).join(", ")}</div>`
+    : `<div><span class="flag">⚠ rests on no sealed verdict</span></div>`;
+  const invented = (e.unsealed_verdict_claims || []).length
+    ? `<div><span class="flag">⚠ names ${e.unsealed_verdict_claims.map(esc).join(", ")}, never sealed</span></div>` : "";
+  const who = e.acknowledged_by_authenticated
+    ? `<span class="mono">${esc(e.acknowledged_by)}</span> <span class="ok">(verified)</span>`
+    : `<span class="mono">${esc(e.acknowledged_by)}</span> <span class="dt">(asserted)</span>`;
+  const state = e.acknowledged
+    ? `<div class="dt">taken up by ${who} — ${esc(e.acknowledged_note)}</div>`
+    : `<div><button class="btn btn-ghost ack" data-index="${i}">Take this up</button></div>`;
+  return `<div class="escal${current ? " current" : ""}${e.acknowledged ? " done" : ""}">
+    <b>${esc(e.why)}</b> <span class="dt">— check: ${esc(e.what_to_check)}</span>
+    ${basis}${invented}${state}</div>`;
+}
+
+function renderMission(m){
+  const hyp = m.hypotheses.length
+    ? m.hypotheses.map(h => `<div><span class="tag">${esc(h.id)}</span> ${esc(h.text)} — <b>${esc(h.status)}</b>${
+        h.rationale ? ` <span class="dt">(${esc(h.rationale)})</span>` : ""}</div>`).join("")
+    : `<span class="empty">none recorded</span>`;
+  const tried = m.tried_hunts.length
+    ? m.tried_hunts.map(t => `<div class="mono">cycle ${t.cycle}: ${t.hunts.map(esc).join(" + ")} <span class="dt">— ${esc(t.reason)}</span></div>`).join("")
+    : `<span class="empty">nothing collected yet</span>`;
+  const qs = m.open_questions.filter(q => !q.resolved);
+  $("mission-out").innerHTML = `
+    <dl class="kv">
+      <dt>Chain</dt><dd>${m.verification.memory_ok
+        ? `<span class="ok">verified</span> <span class="mono dt">head ${esc(m.verification.memory_head.slice(0,16))}…</span>`
+        : `<span class="bad">BROKEN: ${m.verification.errors.map(esc).join("; ")}</span>`}</dd>
+      <dt>Lines of inquiry</dt><dd>${hyp}</dd>
+      <dt>Already collected</dt><dd>${tried}</dd>
+      <dt>Open questions</dt><dd>${qs.length
+        ? qs.map(q => `<div>${esc(q.question)} <span class="dt">— would resolve: ${esc(q.what_would_resolve)}</span></div>`).join("")
+        : `<span class="empty">none</span>`}</dd>
+      <dt>Next cycle</dt><dd>${m.next_action
+        ? `<span class="mono">${esc(m.next_action.due_utc)}</span> — ${esc(m.next_action.action)} <span class="dt">(${esc(m.next_action.why)})</span>`
+        : (m.standing_down ? `<b>stood down</b> <span class="dt">— ${esc(m.standing_down.rationale)}</span>`
+                           : `<span class="empty">not scheduled</span>`)}</dd>
+      <dt>Escalations</dt><dd>${(m.escalations || []).length
+        ? m.escalations.map((e, i) => renderEscalation(e, i, m)).join("")
+        : `<span class="empty">none raised</span>`}</dd>
+    </dl>`;
+}
+
+function renderCatalog(data){
+  $("region").textContent = `evidence & memory processed in ${data.home_region}`;
+  const rows = data.agents.map(a => `
+    <tr>
+      <td class="name">${esc(a.name)}</td>
+      <td>${esc(a.purpose)}</td>
+      <td>${a.data_classes.map(d => `<span class="tag">${esc(d)}</span>`).join("")}
+          ${a.reaches_sealed_core ? `<span class="tag core">sealed core</span>` : ""}
+          ${a.writes_case_memory ? `<span class="tag mem">writes memory</span>` : ""}</td>
+      <td>${a.delegates_to.length ? a.delegates_to.map(d => `<span class="tag">${esc(d)}</span>`).join("") : `<span class="empty">—</span>`}</td>
+      <td class="hash">${esc(a.manifest_hash.slice(0,16))}…</td>
+    </tr>`).join("");
+  $("catalog").querySelector("tbody").innerHTML = rows;
+}
+
+async function loadCatalog(){
+  const dept = $("dept-view").value;
+  renderCatalog(await jget("/catalog" + (dept ? `?department=${encodeURIComponent(dept)}` : "")));
+}
+
+async function loadCases(){
+  const {cases} = await jget("/cases");
+  const sel = $("case-id");
+  const current = sel.value;
+  sel.innerHTML = cases.map(c =>
+    `<option value="${esc(c.case_id)}">${esc(c.case_id)} — ${esc(c.status)}${
+      c.autonomy && c.autonomy.cycles ? ` (${c.autonomy.cycles} cycle${c.autonomy.cycles>1?"s":""})` : ""}</option>`).join("")
+    || `<option value="">no cases — reset the demo cases</option>`;
+  if(current) sel.value = current;
+}
+
+async function boot(){
+  const data = await jget("/catalog");
+  const opts = data.departments.map(d => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
+  $("dept-view").insertAdjacentHTML("beforeend", opts);
+  $("dept-run").innerHTML = opts;
+  $("dept-run").value = "incident-response";
+  renderCatalog(data);
+  await loadCases();
+}
+
+$("dept-view").addEventListener("change", () => loadCatalog().catch(showErr));
+$("seed").addEventListener("click", async () => {
+  $("seed").disabled = true;
+  try { await jpost("/demo/seed"); await loadCases(); } catch(e){ showErr(e); }
+  finally { $("seed").disabled = false; }
+});
+$("run").addEventListener("click", async () => {
+  const caseId = $("case-id").value;
+  if(!caseId) return;
+  $("run").disabled = true;
+  $("cycle-out").innerHTML = `<span class="empty">the fleet is working…</span>`;
+  try {
+    const body = await jpost(`/cases/${encodeURIComponent(caseId)}/cycle`,
+                             {department: $("dept-run").value, force: true});
+    renderCycle(body);
+    renderMission(await jget(`/cases/${encodeURIComponent(caseId)}/mission`));
+    await loadCases();
+  } catch(e){ showErr(e); }
+  finally { $("run").disabled = false; }
+});
+
+document.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button.ack");
+  if(!btn) return;
+  const caseId = $("case-id").value;
+  const note = prompt("What did you do? (recorded on the case)");
+  if(!note) return;
+  btn.disabled = true;
+  try {
+    await jpost(`/cases/${encodeURIComponent(caseId)}/escalations/${btn.dataset.index}/acknowledge`,
+                {note, examiner_id: "perito-01"});
+    renderMission(await jget(`/cases/${encodeURIComponent(caseId)}/mission`));
+  } catch(e){ showErr(e); btn.disabled = false; }
+});
+
+function showErr(e){
+  $("cycle-out").innerHTML = `<div class="err">${esc(e.message || e)}</div>`;
+}
+
+boot().catch(showErr);
+</script>
+<script src="/assets/nav.js"></script>
+</body>
+</html>

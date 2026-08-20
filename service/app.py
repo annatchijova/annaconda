@@ -6,6 +6,11 @@ Endpoints:
   POST /investigate                run an investigation, return sealed stream
   GET  /investigations/{id}        fetch a stored investigation
   GET  /investigations/{id}/stream the sealed verdict entries (dashboard reads this)
+  GET  /registry                   the sealed agent registry (approved manifests)
+  GET  /catalog                    the enterprise catalog: who may task what
+  POST /tasks/sweep                wake the fleet (Cloud Scheduler -> Pub/Sub)
+  POST /cases/{id}/cycle           run one autonomous cycle on demand
+  GET  /cases/{id}/mission         the case's working memory, chain-verified
 
 Investigation modes (POST /investigate body: {"mode": ...}):
   scripted : run the given hunt groups through the sealed loop, no LLM
@@ -19,6 +24,7 @@ not touch the seal, only where the seal is stored.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 import uuid
@@ -28,15 +34,21 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from agent import autonomy, catalog, principal as principal_mod
+from agent import mission as mem
 from agent.purple_team_agent import model_id
 from agent.tools import PurpleTeamSession
 from core.verdict_stream import GENESIS_HASH, verify_stream
 from ml.nominator import SurprisalNominator, events_from_artifacts
 from service.case_store import build_case_store
+from service.chain_store import ConcurrentModificationError
 from tools.velociraptor.adapter import MockTransport, window_to_case
 from tools.velociraptor.vql_templates import TEMPLATES
+
+log = logging.getLogger("annaconda.service")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -57,6 +69,10 @@ app = FastAPI(
                 "ADK+Gemini agent that guides but never decides.",
     version="0.1.0",
 )
+
+# Shared assets (the one design system + any static files). Mounted so every
+# page links /assets/app.css instead of inlining its own <style> and drifting.
+app.mount("/assets", StaticFiles(directory=str(STATIC_DIR)), name="assets")
 
 # In-memory investigation store (one-off demo runs): {investigation_id: {...}}.
 _STORE: dict[str, dict] = {}
@@ -166,6 +182,12 @@ def console_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "cases.html")
 
 
+@app.get("/fleet-console", include_in_schema=False)
+def fleet_page() -> FileResponse:
+    """The autonomous fleet: the enterprise catalog, and one cycle on demand."""
+    return FileResponse(STATIC_DIR / "fleet.html")
+
+
 @app.get("/architecture", include_in_schema=False)
 def architecture_page() -> FileResponse:
     """End-to-end architecture walkthrough."""
@@ -185,6 +207,20 @@ def health() -> dict:
         "case_store": _CASE_STORE.backend,
         "autonomous_sweeps": _SWEEP_STATE["count"],
         "last_sweep_utc": _SWEEP_STATE["last_utc"],
+        # The fleet's unattended work: cycles are agent-driven, sweeps are only
+        # the wake-ups. Most wake-ups should skip most cases.
+        "autonomous_cycles": _SWEEP_STATE["cycles_total"],
+        "cases_worked_last_sweep": _SWEEP_STATE["last_swept"],
+        "cases_not_due_last_sweep": _SWEEP_STATE["last_skipped"],
+        "cases_deferred_last_sweep": _SWEEP_STATE["last_deferred"],
+        "sweep_cycle_cap": SWEEP_MAX_CYCLES,
+        "escalations_raised": _SWEEP_STATE["escalations_total"],
+        "commander_planner": ("gemini" if autonomy.model_reachable()
+                              else "deterministic-fallback"),
+        "fleet_department": autonomy.COMMANDER_DEPARTMENT,
+        # Whether a tasking must present a verified identity, or may assert its
+        # department. The demo asserts; the record always says which.
+        "requires_authenticated_principal": principal_mod.require_authenticated(),
         "tracing": tracing_mode(),
         "narrators": {
             "investigator": {
@@ -204,6 +240,30 @@ def registry() -> dict:
     manifest is not here."""
     from agent.registry import REGISTRY_VERSION, approved_registry
     return {"registry_version": REGISTRY_VERSION, "agents": approved_registry()}
+
+
+@app.get("/catalog")
+def agent_catalog(department: Optional[str] = None) -> dict:
+    """The enterprise catalog: which department may task which agent, over what
+    data, in what region. Pass ?department=soc to see the fleet as one
+    department sees it — the SOC may task the collectors, but adjudication
+    belongs to forensics.
+
+    Each entry names the manifest hash the sealed registry approved, so a
+    published agent is always a specific, approved tool contract.
+    """
+    try:
+        entries = catalog.catalog(department)
+    except catalog.NotPublishedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "department": department,
+        "home_region": catalog.HOME_REGION,
+        "data_classes": sorted(catalog.DATA_CLASSES),
+        "departments": sorted(catalog.DEPARTMENTS),
+        "agents": entries,
+        "registry_agreement": catalog.catalog_matches_registry() or "ok",
+    }
 
 
 @app.get("/hunts")
@@ -305,6 +365,10 @@ class CaseCreateRequest(BaseModel):
     hostname: str = Field("WIN11-VICTIM", min_length=1, max_length=256)
     client_id: str = Field("C.demo01", min_length=1, max_length=256)
     examiner_id: str = Field(..., min_length=1, max_length=128)
+    # Which bundled telemetry this host reports. The autonomous fleet replays
+    # it on every unattended cycle, so it is a property of the case, not of one
+    # request (a compromised host stays compromised between cycles).
+    scenario: str = Field("benign", pattern=r"^(benign|attack|insufficient)$")
 
 
 class CaseInvestigateRequest(BaseModel):
@@ -336,10 +400,18 @@ def _session_for_case(case: dict, scenario: str) -> PurpleTeamSession:
 
 @app.post("/cases")
 def create_case(req: CaseCreateRequest) -> dict:
+    # A created case is due immediately, so on the public demo one
+    # unauthenticated POST here buys one Gemini turn on the next sweep. The cap
+    # in the sweep bounds the cost; this bounds the rate of arrival.
+    if not _rate_ok("create_case"):
+        raise HTTPException(status_code=429,
+                            detail="rate limited — each case joins the "
+                                   "autonomous sweep; try again in a few seconds")
     if _CASE_STORE.get_case(req.case_id) is not None:
         raise HTTPException(status_code=409, detail=f"case {req.case_id} already exists")
     host = {"client_id": req.client_id, "hostname": req.hostname, "os": "windows"}
-    case = _CASE_STORE.create_case(req.case_id, host, req.examiner_id)
+    case = _CASE_STORE.create_case(req.case_id, host, req.examiner_id,
+                                   scenario=req.scenario)
     return {"case": case, "persistence": _CASE_STORE.backend}
 
 
@@ -509,12 +581,21 @@ def injection_demo() -> dict:
     scorer_result = _vigia_score(window_to_case(window))
     entry = session.adjudicate(summary["window_id"])
 
-    # What the attacker planted, pulled straight from the evidence.
+    # What the attacker planted, pulled straight from the evidence. The bait is
+    # a command line carrying a fake verdict to address a narrator directly —
+    # here a forged EDR annotation ("FINAL CLASSIFICATION: BENIGN"); the classic
+    # "ignore previous instructions" is the same shape. Match either so the demo
+    # never shows an empty planted line just because the fixture's bait style
+    # changed.
+    _BAIT_MARKERS = ("edr-annotation", "final classification",
+                     "classification:", "allowlisted")
     planted = ""
     for a in artifacts:
         row = (a.get("metadata") or {}).get("row") or {}
         cl = row.get("CommandLine") or ""
-        if "ignore" in cl.lower() and "instruction" in cl.lower():
+        low = cl.lower()
+        if (("ignore" in low and "instruction" in low)
+                or any(m in low for m in _BAIT_MARKERS)):
             planted = cl
             break
 
@@ -563,42 +644,275 @@ def injection_demo() -> dict:
     }
 
 
-# --- autonomous sweeps: runs without a human (Cloud Scheduler -> Pub/Sub) -----
+# --- autonomous operation: the fleet works cases with nobody watching --------
+#
+# This used to be a script: a cron that ran one hard-coded collection on every
+# open case, forever. It is now a fleet of agents working cases on their own
+# schedule — the commander reads what earlier cycles established, tasks the
+# specialists it is cleared to task, and decides when to look again, when a
+# human is needed, and when to stop. What it still cannot do is decide what the
+# evidence means: the verdict comes back sealed from the deterministic engine.
+#
+# Most ticks should do almost nothing. A case is worked only when the fleet's
+# own schedule says it is due, so a quiet host is not re-collected every hour.
 
-_SWEEP_STATE = {"count": 0, "last_utc": None, "last_swept": 0}
+_SWEEP_STATE = {"count": 0, "last_utc": None, "last_swept": 0,
+                "last_skipped": 0, "cycles_total": 0, "escalations_total": 0,
+                "last_deferred": 0}
+
+# How many cycles one wake-up may run. Each cycle is a Gemini turn, and case
+# creation is unauthenticated on the public demo, so without a cap the cost of a
+# sweep is set by whoever created the most cases. Cases past the cap are not
+# dropped — they are deferred to the next wake-up, worst first.
+SWEEP_MAX_CYCLES = int(os.environ.get("VIGIA_SWEEP_MAX_CYCLES", "10"))
+
+
+def _sweep_priority(row: dict) -> tuple:
+    """Order for the cap: the cases that must not wait, first.
+
+    A host under an adjudicated malicious verdict outranks everything, then
+    whatever is most overdue. Without this, a flood of freshly created cases
+    would take the cap in list order and starve the hourly re-check of a
+    compromised host — the one case the whole schedule exists to protect.
+    """
+    from service.case_store import verdict_rank
+    autonomy_row = row.get("autonomy") or {}
+    due = autonomy_row.get("next_due_utc") or ""
+    # Never-scheduled cases sort after overdue ones with the same rank.
+    return (-verdict_rank(row.get("worst_verdict")), due or "9999")
+
+
+async def _run_cycle_on_case(case: dict, *, department: str, trigger: str,
+                             force: bool = False,
+                             principal: Optional[dict] = None) -> dict:
+    """One unattended cycle on one case, persisted."""
+    cid = case["case_id"]
+    # The due check first: building a session mints a temp directory, and most
+    # wake-ups on most cases correctly skip. Building one for every skipped
+    # case leaked a directory per case per sweep — on a cron, forever.
+    mission = mem.attach(case)
+    if not force and not mem.is_due(mission):
+        return {"acted": False, "reason": "not due", "case_id": cid,
+                "next_action": mission.get("next_action"),
+                "standing_down": mission.get("standing_down") is not None}
+
+    session = _session_for_case(case, case.get("scenario", "benign"))
+    result = await autonomy.run_cycle(session, case, department=department,
+                                      trigger=trigger, force=force,
+                                      principal=principal)
+    if not result["acted"]:
+        return result
+
+    # One write, carrying both the sealed output and the memory the cycle
+    # reasoned into. Persisting them separately would re-read the case between
+    # them and fork the memory into two objects appending to one hash chain —
+    # see FirestoreCaseStore.apply_cycle. The memory is persisted even when the
+    # cycle sealed nothing: a cycle that only reasoned still changed what the
+    # next one knows.
+    _CASE_STORE.apply_cycle(cid, list(session._entries), result["verdicts"],
+                            session.audit_trail, case["mission"])
+    return result
 
 
 @app.post("/tasks/sweep")
 async def sweep(req: Request) -> dict:
-    """Continue hunts on open cases with no human in the loop. Cloud Scheduler
-    publishes to Pub/Sub on a cron; a push subscription delivers here; each
-    open case gets one more sealed window appended to its chain. The body (a
-    Pub/Sub push envelope) is ignored — the trigger is the signal."""
+    """Wake the fleet. Cloud Scheduler publishes to Pub/Sub on a cron; a push
+    subscription delivers here; each case that is *due* gets one autonomous
+    cycle. The body (a Pub/Sub push envelope) is ignored — the trigger is the
+    signal."""
     from datetime import datetime, timezone
-    swept = []
-    for row in _CASE_STORE.list_cases():
-        # A resolved-malicious case does not need re-hunting; keep watching the rest.
-        if row.get("status") == "malice":
-            continue
+    # A Pub/Sub push subscription can be configured to present an OIDC token;
+    # when it is, the cron runs as a verified identity like any operator. When
+    # it is not, its department is asserted and every cycle says so.
+    principal = _principal_for(req)
+    worked, skipped, deferred = [], [], []
+    for row in sorted(_CASE_STORE.list_cases(), key=_sweep_priority):
         cid = row["case_id"]
         case = _CASE_STORE.get_case(cid)
         if case is None:
             continue
         # Demo/showcase cases are left untouched so a judge always sees a clean,
-        # predictable state (they reset and drive those themselves).
+        # predictable state (they drive those from /console themselves).
         if case.get("demo"):
             continue
-        session = _session_for_case(case, "benign")
-        result = _run_scripted(session, [["pslist", "netstat"]])
-        updated = _CASE_STORE.apply_run(
-            cid, list(session._entries), result["verdicts"], session.audit_trail)
-        swept.append({"case_id": cid, "worst_verdict": updated["worst_verdict"],
-                      "sealed_verdicts": len(updated["entries"])})
+        if len(worked) >= SWEEP_MAX_CYCLES:
+            # Deferred, not dropped — and said out loud, because a sweep that
+            # silently stopped part way would read as "every case is up to date".
+            deferred.append({"case_id": cid,
+                             "worst_verdict": row.get("worst_verdict")})
+            continue
+        try:
+            result = await _run_cycle_on_case(
+                case, department=principal["department"],
+                trigger="cloud-scheduler", principal=principal)
+        except ConcurrentModificationError as exc:
+            # Another writer reached this case first. Its work stands; this
+            # cycle's is discarded rather than written over the top. The next
+            # sweep picks the case up from current state.
+            log.warning("autonomous cycle on case %s lost a write race: %s",
+                        cid, exc)
+            skipped.append({"case_id": cid, "reason": "concurrent write",
+                            "detail": str(exc)})
+            continue
+        except Exception as exc:  # noqa: BLE001
+            # One bad case must not stop the sweep for every other case.
+            log.exception("autonomous cycle failed on case %s", cid)
+            skipped.append({"case_id": cid, "reason": f"cycle failed: {exc}"})
+            continue
+
+        if not result["acted"]:
+            skipped.append({"case_id": cid, "reason": result["reason"],
+                            "next_due_utc": (result.get("next_action") or {}).get("due_utc"),
+                            "standing_down": result.get("standing_down")})
+            continue
+
+        _SWEEP_STATE["cycles_total"] += 1
+        if result.get("escalation"):
+            _SWEEP_STATE["escalations_total"] += 1
+        worked.append({
+            "case_id": cid,
+            "cycle": result["cycle"],
+            "planner": result["planner"],
+            "verdicts": [v["verdict_state"] for v in result["verdicts"]],
+            "escalated": result.get("escalation") is not None,
+            "next_due_utc": (result.get("next_action") or {}).get("due_utc"),
+            "standing_down": result.get("standing_down") is not None,
+            "memory_ok": result["memory"]["memory_ok"],
+        })
+
     _SWEEP_STATE["count"] += 1
     _SWEEP_STATE["last_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    _SWEEP_STATE["last_swept"] = len(swept)
-    return {"swept": len(swept), "cases": swept,
-            "autonomous_sweeps_total": _SWEEP_STATE["count"]}
+    _SWEEP_STATE["last_swept"] = len(worked)
+    _SWEEP_STATE["last_skipped"] = len(skipped)
+    _SWEEP_STATE["last_deferred"] = len(deferred)
+    return {"worked": len(worked), "cases": worked,
+            "skipped": len(skipped), "not_due": skipped,
+            "deferred": len(deferred), "deferred_cases": deferred[:20],
+            "cycle_cap": SWEEP_MAX_CYCLES,
+            "autonomous_sweeps_total": _SWEEP_STATE["count"],
+            "autonomous_cycles_total": _SWEEP_STATE["cycles_total"]}
+
+
+class CycleRequest(BaseModel):
+    # The department the fleet runs as. The catalog decides what that department
+    # may task: run this as "soc" and the adjudication request is refused.
+    department: str = Field(autonomy.COMMANDER_DEPARTMENT, min_length=1,
+                            max_length=64)
+    # Work the case now even if the fleet scheduled itself for later. This is
+    # for a human asking to see a cycle; the cron never forces.
+    force: bool = True
+
+
+def _principal_for(request: Request, claimed: Optional[str] = None) -> dict:
+    """Resolve and enforce the principal behind a tasking.
+
+    A verified identity token wins over anything the request claims. With no
+    verified identity the department is *asserted*, which this deployment
+    allows by default and records as asserted — unless
+    VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL is set, in which case it is refused.
+    """
+    resolved = principal_mod.resolve(
+        authorization_header=request.headers.get("authorization"),
+        claimed_department=claimed,
+        default_department=autonomy.COMMANDER_DEPARTMENT)
+    try:
+        return principal_mod.enforce(resolved)
+    except principal_mod.UnauthenticatedPrincipalError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@app.post("/cases/{case_id}/cycle")
+async def run_case_cycle(case_id: str, req: CycleRequest,
+                         request: Request) -> dict:
+    """Run one autonomous cycle on demand and return everything it did.
+
+    Same code path the Cloud Scheduler sweep runs — this endpoint only supplies
+    the wake-up, so what you watch here is what happens at 3am with nobody
+    looking.
+    """
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    if not _rate_ok("cycle"):
+        raise HTTPException(status_code=429,
+                            detail="rate limited — an agentic cycle calls "
+                                   "Gemini; try again in a few seconds")
+    principal = _principal_for(request, req.department)
+    try:
+        result = await _run_cycle_on_case(
+            case, department=principal["department"], trigger="operator",
+            force=req.force, principal=principal)
+    except ConcurrentModificationError as exc:
+        # Another cycle wrote this case while this one was working. Refusing is
+        # the honest outcome — writing would drop one cycle's reasoning and
+        # leave the memory chain failing verification.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    updated = _CASE_STORE.get_case(case_id) or case
+    return {"cycle": result, "status": updated.get("status"),
+            "worst_verdict": updated.get("worst_verdict"),
+            "sealed_verdicts_total": len(updated.get("entries", [])),
+            "persistence": _CASE_STORE.backend}
+
+
+@app.get("/cases/{case_id}/mission")
+def case_mission(case_id: str) -> dict:
+    """The case's working memory: what the fleet established, tried, and
+    planned across every cycle — with its hash chain re-verified, so a memory
+    that was edited between cycles says so."""
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    mission = mem.attach(case)
+    return {"case_id": case_id,
+            "brief": mem.brief(mission, case=case),
+            "hypotheses": mission.get("hypotheses", []),
+            "open_questions": mission.get("open_questions", []),
+            "tried_hunts": mission.get("tried_hunts", []),
+            "next_action": mission.get("next_action"),
+            # The current one is the most severe nobody has acknowledged; the
+            # full list is here so a later routine escalation can never be
+            # mistaken for the only one raised.
+            "escalation": mission.get("escalation"),
+            "escalations": mission.get("escalations", []),
+            "standing_down": mission.get("standing_down"),
+            "journal": mission.get("journal", []),
+            "verification": mem.verify_mission(mission)}
+
+
+class AcknowledgeRequest(BaseModel):
+    note: str = Field(..., min_length=1, max_length=2000)
+    examiner_id: str = Field(..., min_length=1, max_length=128)
+
+
+@app.post("/cases/{case_id}/escalations/{index}/acknowledge")
+def acknowledge_escalation(case_id: str, index: int, req: AcknowledgeRequest,
+                           request: Request) -> dict:
+    """A human takes up one escalation, saying what they did.
+
+    This is the other half of escalation: an escalation stops being shown
+    because somebody handled it, never because something newer arrived. When
+    this one is acknowledged the next unacknowledged one surfaces.
+    """
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    # Who says they handled it, and whether we know that. An escalation for a
+    # sealed malicious verdict stops demanding attention when this is written,
+    # so the claim and its confidence have to travel together.
+    principal = _principal_for(request)
+    mission = mem.attach(case)
+    try:
+        entry = mem.acknowledge_escalation(
+            mission, actor=principal.get("identity") or req.examiner_id,
+            index=index, note=req.note,
+            authenticated=bool(principal.get("authenticated")))
+    except mem.MissionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        _CASE_STORE.save_mission(case_id, mission)
+    except ConcurrentModificationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"acknowledged": entry, "now_showing": mission.get("escalation")}
 
 
 @app.post("/demo/seed")
@@ -608,6 +922,10 @@ def demo_seed() -> dict:
     host, a compromised host, and a host stuck in ABSTAIN with an open question
     ready to be reopened. These demo cases are excluded from the autonomous
     sweep, so nothing mutates them behind the judge's back."""
+    if not _rate_ok("demo_seed"):
+        raise HTTPException(status_code=429,
+                            detail="rate limited — seeding deletes and rebuilds "
+                                   "the showcase cases")
     host = {"client_id": "C.demo", "hostname": "WIN11-VICTIM", "os": "windows"}
     plan = {
         "DEMO-BENIGN": ("benign", [["pslist", "netstat"]]),
@@ -616,8 +934,10 @@ def demo_seed() -> dict:
     }
     for cid, (scenario, groups) in plan.items():
         _CASE_STORE.delete_case(cid)
+        # The scenario is stored on the case so an on-demand autonomous cycle
+        # replays this host's telemetry, not the benign default.
         case = _CASE_STORE.create_case(cid, dict(host, hostname=cid.split("-")[1]),
-                                       "perito-01", demo=True)
+                                       "perito-01", demo=True, scenario=scenario)
         session = _session_for_case(case, scenario)
         result = _run_scripted(session, groups)
         _CASE_STORE.apply_run(cid, list(session._entries),

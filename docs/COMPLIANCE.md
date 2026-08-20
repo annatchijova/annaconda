@@ -1,0 +1,243 @@
+# Running a fleet on production data without giving it the keys
+
+This is the enterprise question annaconda has to answer to be trusted with real
+endpoint telemetry: *if these agents run unattended for weeks, what exactly can
+they do, who authorised it, and what stops one of them — or a prompt injection
+that reaches one — from doing something else?*
+
+Three mechanisms answer it, and each one is a gate in code with a test behind
+it, not a paragraph of intent.
+
+---
+
+## 1. Agents are published, not merely deployed
+
+`agent/catalog.py` is the enterprise catalog. Every agent in the fleet is
+published with:
+
+| Field | What it constrains |
+|---|---|
+| `department` | who owns the agent |
+| `available_to` | which departments may task it |
+| `tools` | its exact tool contract |
+| `manifest_hash` | the SHA-256 of that contract, as approved in the sealed registry |
+| `data_classes` | the classes of data it is cleared to touch |
+| `delegates_to` | which other agents it may task |
+| `reaches_sealed_core` | whether it can reach the deterministic engine at all |
+| `region` | where its data may be processed |
+
+`GET /catalog?department=soc` returns the fleet *as that department sees it* —
+a cross-department view, not a flat list.
+
+**The gate.** `catalog.authorize(agent, department=…, data_classes=…, region=…)`
+raises rather than returns for a tasking that is not published, not cleared, or
+not in-region. It is called on every delegation the commander attempts, at the
+tool boundary, on every call — not once at startup.
+
+**Demonstrable least privilege.** Adjudication belongs to forensics. Run the
+autonomous cycle as the SOC and watch the adjudication request get refused
+while the collection it *is* cleared for proceeds:
+
+```bash
+curl -X POST "$URL/cases/CASE-1/cycle" -d '{"department":"soc"}'
+# fleet_log: {"role":"correlator","action":"refused_by_catalog", …}
+# verdicts: []
+```
+
+That refusal is `tests/test_autonomous_service.py::
+test_a_cycle_run_as_the_soc_is_refused_the_adjudication`.
+
+**One identity, checked twice.** A catalog entry names a manifest hash; the
+sealed registry (`agent/registry.py`) refuses to *load* an agent whose manifest
+is not approved. Add a tool to an agent out of band and its hash changes: the
+registry will not build it, and the catalog entry no longer describes it.
+
+---
+
+## 2. Context across weeks, and proof it was not edited
+
+`agent/mission.py` is the case's working memory: open hypotheses, collections
+already run, unresolved questions, the schedule the fleet set for itself, and
+the reasoning behind each. It is what one cycle leaves for the next, which may
+be days later.
+
+Memory an autonomous fleet keeps for weeks is memory an attacker has weeks to
+edit. So every mutation appends a journal entry sealed over the previous one,
+with the same canonical-v2 + SHA-256 recipe that seals verdicts. `GET
+/cases/{id}/mission` re-verifies the chain on every read; editing, reordering,
+dropping, or forging an entry is detected (four tests in
+`tests/test_mission.py`).
+
+**Pacing, not polling.** The fleet schedules its own next wake-up per case
+(`schedule_next_cycle`), so `/tasks/sweep` works only the cases that are *due*.
+A host adjudicated malicious is re-checked in an hour; a quiet one in a day;
+one with nothing left to do gets a `stand_down` and is not touched again. Most
+wake-ups on most cases correctly do nothing — `/health` reports
+`cases_worked_last_sweep` against `cases_not_due_last_sweep`.
+
+**Schema versioning.** Missions carry `schema_version`. A case opened months
+ago under an older shape is migrated forward on read, and the migration is
+recorded in its own journal. An unrecognised version is refused, not guessed.
+
+---
+
+## 3. The model cannot reach the decision, on any path
+
+This is annaconda's founding invariant, and autonomy does not weaken it — it is
+what makes autonomy defensible.
+
+- The deterministic core scores the evidence with exact arithmetic (no floats)
+  and **seals** the verdict with SHA-256 before any model sees the result.
+- The commander's tool contract contains no collection tool and no adjudication
+  tool. It cannot gather evidence and it cannot adjudicate; it can only task
+  specialists who are cleared to. `tests/test_autonomy.py::
+  test_the_commander_holds_no_collection_or_adjudication_tool_of_its_own`
+  asserts its contract is disjoint from every specialist's.
+- Nothing in mission memory is an input to the case's status or verdict.
+  `service/case_store._apply_run` computes both from the sealed chain alone.
+  The test for this fills memory with the most persuasive lie available — every
+  hypothesis refuted, a stand-down declaring the host clean and quoting a
+  fabricated hash — and shows the status and every seal unchanged.
+
+So the blast radius of a compromised or manipulated agent is bounded to *what
+gets investigated and when*. It cannot reach *what the evidence means*.
+
+**And what it says is checked against what was sealed.** An agent working
+unattended can escalate or narrate at any point in a cycle — including after a
+collection failed and nothing was adjudicated at all. Two mechanical checks,
+neither of them another model:
+
+- Every escalation carries a `sealed_basis`: the verdict states and entry
+  hashes the cycle actually sealed, read from the adjudicated record by the
+  tool itself. The agent cannot supply, inflate, or suppress it. An escalation
+  that rests on nothing is recorded with `unsupported_by_seal: true` rather
+  than refused — refusing could strand a real incident; what it must not do is
+  look supported.
+- Escalation text and the closing narration are compared against the sealed
+  verdict states of that cycle. A verdict named in prose but never sealed is
+  reported as `unsealed_verdict_claims` and shown on the fleet console.
+
+`tests/test_commander_loop.py` drives the real ADK loop with a scripted model to
+exercise exactly this: a commander that escalates citing `MALICE_HIGH` after a
+failed collection, and one that narrates `BENIGN_HIGH` over a sealed
+`MALICE_HIGH`. Both are flagged; neither moves a seal.
+
+---
+
+## Data residency — what is and is not covered
+
+**Covered.** Evidence windows, sealed verdicts, and case memory are processed by
+the stdlib-only deterministic core inside the Cloud Run service and stored in
+Firestore, both in `us-central1`. `catalog.HOME_REGION` is enforced by
+`authorize`, so a second region cannot be introduced without an explicit
+catalog change.
+
+**Not covered.** The model round-trip. Gemini 3.x on Vertex AI is served from
+location `global`, not a region — narration prompts leave `us-central1` by
+design, and no configuration in this repo changes that. This is the reason the
+commander is cleared for `case_memory` only and never for raw
+`endpoint_telemetry`: what reaches the model is sealed results, the mission
+brief, and its own instructions — not evidence rows it was not cleared for.
+
+An organisation with a hard data-residency requirement on the *narration* would
+need a regional model endpoint. That is a deployment change, not a code change,
+but it is not done here and should not be claimed.
+
+## Other honest limits
+
+- **Firestore document size — measured, and corrected.** An earlier version of
+  this document said a case worked daily had "ample headroom" and only a
+  multi-year deployment would meet Firestore's 1 MiB per-document limit. That
+  was wrong, and measurement is why: a cycle adds about 4 KB across the sealed
+  stream and the mission journal, so one document is full at roughly **270
+  cycles**. The case that reaches it first is the one that matters most — a
+  host under an adjudicated malicious verdict is re-checked hourly, which is
+  about **eleven days**, not years.
+
+  Truncating a hash chain to fit is not an option: a chain you can shorten is a
+  chain an attacker can shorten. So the chains are stored in bounded segment
+  documents (`service/chain_store.py`), with the case document keeping only an
+  index. Reading concatenates the segments in order, reproducing exactly the
+  list the verifiers already consume, so `verify_stream` and `verify_mission`
+  are unchanged and still span the whole history. A missing segment is refused
+  rather than verified as if it were whole — a verifier handed a silently short
+  list would report a clean chain over incomplete history.
+
+  `tests/test_chain_segmentation.py` runs the real store against a double that
+  enforces the same 1 MiB limit, over 1200 cycles' worth of chain (the
+  unsegmented document would be 1.28 MiB), and checks that a chain still
+  verifies across segment boundaries.
+
+- **Concurrent writers are refused, not merged.** Two cycles working one case
+  are two branches of one hash chain, not one longer chain. Writing either over
+  the other drops a cycle's reasoning and leaves a chain that fails
+  verification — a tampering alarm on a record nobody tampered with. The stored
+  chain head is checked before any write and a divergent writer is refused
+  (409 on the endpoint, a recorded `concurrent write` skip in the sweep). The
+  case document's index is the single commit point, so a half-finished write
+  leaves nothing readable. This was found by auditing the segmentation change,
+  and is written up as RT-07 and RT-09 in
+  [RED_TEAM_AUDIT.md](RED_TEAM_AUDIT.md).
+
+- **An escalation is closed by a person, not by time.** Escalations accumulate;
+  the one a case shows is the most severe nobody has acknowledged, ranked from
+  its sealed basis. `POST /cases/{id}/escalations/{i}/acknowledge` records who
+  took it up and what they did, into the sealed journal. Before this, a later
+  routine escalation displaced an unacknowledged one for a sealed malicious
+  verdict (RT-13).
+
+- **The fleet cannot abandon a compromised host.** Standing a case down, or
+  scheduling it more than two hours out, is refused when the *sealed* record
+  says the host is malicious — read from the case's worst verdict and what the
+  session sealed, never from mission memory, which the agent writes. And a
+  sealed `MALICE` verdict raises an escalation mechanically, attributed to the
+  engine, if the cycle closes without one. Before this, a commander could seal
+  `MALICE_HIGH`, stand the case down, and tell nobody (RT-08).
+- **Cost of an unattended wake-up is capped.** Every cycle is a Gemini turn and
+  case creation is unauthenticated on the demo, so one sweep's cost was set by
+  whoever created the most cases — 50 created by a stranger produced 50 cycles
+  (RT-14). A sweep now runs at most `VIGIA_SWEEP_MAX_CYCLES` (default 10) and
+  reports what it deferred, ordered worst-sealed-verdict first so the cap cannot
+  be used to starve a compromised host of its hourly re-check (RT-15).
+  Case *storage* is still unbounded — the cap limits cost, the rate limit slows
+  arrival, and a patient stranger can still fill the database. A quota, or
+  authentication on creation, is the real answer and is not built.
+
+- **Rate limiting** on the paid endpoints is a coarse per-instance sliding
+  window (`VIGIA_RATE_MAX`), one bucket per endpoint rather than per principal.
+  It stops a hammer; it is not a quota system.
+- **Authentication.** The catalog gate is only as good as the identity in front
+  of it, so `agent/principal.py` resolves one on every tasking and names its
+  confidence. A presented Google identity token is verified and mapped to a
+  department through the deployment's roster (`VIGIA_DEPARTMENT_ROSTER`); a
+  verified identity wins over whatever the request claims, so a caller cannot
+  present a SOC token and ask to run as forensics. With no verified identity
+  the department is **asserted**, and the principal — department, identity,
+  `authenticated: false`, and how it was resolved — is sealed into the case's
+  mission journal, so a record answers "who ran this cycle, and was that
+  verified" months later.
+
+  A token only authenticates when `VIGIA_EXPECTED_AUDIENCE` names this service.
+  Without it google-auth does not check the `aud` claim at all, so a correctly
+  signed token minted for an unrelated service would verify — the confused
+  deputy this check exists to stop (RT-11 in
+  [RED_TEAM_AUDIT.md](RED_TEAM_AUDIT.md), confirmed against a signed token
+  carrying a foreign audience). An unverifiable token is treated as no token.
+
+  The deployed demo runs `--allow-unauthenticated` and therefore asserts. That
+  is a posture, not a gap in the mechanism: set
+  `VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL=true` and an asserted principal is
+  refused with 403. `/health` reports which posture is live. What remains
+  genuinely undone is the identity provider itself — a real deployment puts
+  Cloud Run IAM or an IAP in front and populates the roster.
+- **Gemini's own behaviour is not tested here.** The ADK loop is —
+  `tests/test_commander_loop.py` runs it end to end against a scripted
+  `BaseLlm` that reads real tool results from the transcript, so tool
+  declarations, function-call dispatch, result feedback, fallback on model
+  failure and the seal checks all run in CI. What no offline test can cover is
+  whether the live model chooses well. The architecture is built so that a bad
+  choice costs a wasted collection, not a wrong verdict.
+- **The trust boundary of the evidence itself** is unchanged and examined in
+  [RED_TEAM_AUDIT.md](RED_TEAM_AUDIT.md): a sealed verdict certifies
+  reproducible adjudication of the *collected* evidence, not the truth of that
+  evidence.

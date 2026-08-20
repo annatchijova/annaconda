@@ -2,10 +2,11 @@
 
 **Live purple-team DFIR with verdicts a court could trust.** annaconda analyzes
 an endpoint as an attack unfolds and seals a reproducible, MITRE-mapped verdict.
-Two Google ADK + Gemini agents drive and explain the investigation — **but the
-language model is out of the decision path.** The deterministic engine produces
-and seals the verdict *before* any model describes it. Swap the narrator and the
-verdict, its score, and its hash never change.
+A fleet of Google ADK + Gemini agents works cases **unattended** — choosing what
+to hunt, carrying an investigation's memory across weeks, escalating to a human
+when one is needed — **but the language model is out of the decision path.** The
+deterministic engine produces and seals the verdict *before* any model describes
+it. Swap the narrator and the verdict, its score, and its hash never change.
 
 > Built for the **All Things Agentic Hackathon** (Google / Gemini).
 > Live: **https://vigia-live-1028999311218.us-central1.run.app**
@@ -50,6 +51,7 @@ it cannot touch the verdict.
 | `/` | Landing — what annaconda is and how it works |
 | `/console` | **Analyst console** — the case queue: one case per host, verdicts accumulate into a single sealed record (Firestore-backed) |
 | `/exhibit` | Court-exhibit dashboard — run a sealed investigation (benign or attack), watch the agent investigate, replay to prove determinism |
+| `/fleet-console` | **Autonomous fleet** — the enterprise catalog (who may task what, over what data) and one unattended cycle on demand, step by step |
 | `/consult` | Mentor console — a second agent that teaches junior examiners |
 | `/architecture` | End-to-end architecture walkthrough |
 
@@ -63,8 +65,11 @@ shown step by step.
 ## Architecture
 
 ```
-Browser → Cloud Run (FastAPI) → ADK agent (Gemini 3.5, Vertex AI)
-                                     │  chooses hunts, narrates
+Cloud Scheduler → Pub/Sub ─┐
+Browser ───────────────────┴→ Cloud Run (FastAPI) → ADK agents (Gemini 3.5, Vertex AI)
+                                     │  commander decides what to hunt, whom to
+                                     │  task, when to look again, when to escalate
+                              catalog gate: department · data class · region
         ───────────── trust boundary ─────────────
                                      ▼  everything below is deterministic
    run_hunt      → curated Velociraptor VQL → sealed evidence window (SHA-256)
@@ -76,9 +81,13 @@ The agent orchestrates and explains; the sealed engine decides. See
 [`/architecture`](https://vigia-live-1028999311218.us-central1.run.app/architecture)
 for the full walkthrough.
 
-**Two ADK agents.** The *investigator* (`agent/purple_team_agent.py`) drives the
-hunt loop; the *mentor* (`agent/consult_agent.py`) teaches junior examiners with
-read-only tools. Both act and explain; neither decides.
+**The agents.** The *commander* (`agent/autonomy.py`) works cases unattended,
+tasking a fleet of specialists with strictly disjoint tool contracts
+(`agent/fleet.py`): two collection hunters and a correlator that alone reaches
+the sealed core. The *investigator* (`agent/purple_team_agent.py`) drives the
+hunt loop for a human operator; the *mentor* (`agent/consult_agent.py`) teaches
+junior examiners with read-only tools. All of them act, delegate and explain;
+none of them decides.
 
 **The analyst workflow.** A *case* (`service/case_store.py`) is one host's
 tamper-evident record: each investigation run continues the case's sealed chain,
@@ -86,16 +95,79 @@ so the whole case verifies as one unbroken record. Cases persist in Firestore
 (with honest degradation to in-memory when Firestore is unreachable — `/health`
 reports which backend is active).
 
-**It runs without you.** Cloud Scheduler → Pub/Sub → a push to `/tasks/sweep`
-continues hunts on open cases on a cron, appending sealed windows with no human
-in the loop. `/health` shows `autonomous_sweeps`. (See DEPLOY.md.)
+**It runs without you — and it decides while it runs.** Cloud Scheduler → Pub/Sub
+→ a push to `/tasks/sweep` wakes the fleet. Each case that is *due* gets one
+autonomous cycle (`agent/autonomy.py`): the commander reads what earlier cycles
+established, tasks the specialists it is cleared to task, and decides when to
+look again, when a human is needed, and when to stop. It holds no collection
+tool and no adjudication tool of its own — the only way it reaches evidence or
+the sealed core is by tasking somebody who is cleared for it, through the
+catalog, on every call.
+
+So the agency is real and the verdict is still untouchable: the fleet decides
+*what to investigate and when*, the deterministic engine decides *what it
+means*. Watch a cycle at [`/fleet-console`](https://vigia-live-1028999311218.us-central1.run.app/fleet-console) — it is the
+same code path the cron runs.
+
+**The fleet paces itself across weeks.** Each cycle sets its own next wake-up
+for that case: a host under a malicious verdict is re-checked in an hour, a
+quiet one in a day, and one with nothing left to do gets a `stand_down` and is
+not touched again. Most wake-ups on most cases correctly do nothing — `/health`
+reports `cases_worked_last_sweep` against `cases_not_due_last_sweep`.
+
+**Mission memory: what survives to the next cycle.** A case carries the fleet's
+working memory (`agent/mission.py`) — open hypotheses, collections already run,
+unresolved questions, the escalation it raised and why. Memory an autonomous
+fleet keeps for weeks is memory an attacker has weeks to edit, so every mutation
+seals a journal entry onto the previous one with the same SHA-256 recipe that
+seals verdicts; `GET /cases/{id}/mission` re-verifies the chain on every read.
+Both chains are stored in bounded segments (`service/chain_store.py`), because a
+host re-checked hourly fills a single Firestore document in about eleven days —
+and a chain you can truncate to fit is a chain an attacker can truncate.
+
+**What the fleet says is checked against what it sealed.** Every escalation
+carries the verdict states and entry hashes the cycle actually sealed, read from
+the adjudicated record by the tool itself — the agent cannot supply or suppress
+it — and an escalation resting on nothing is recorded as such. The closing
+narration is compared the same way: a verdict named in prose but never sealed is
+flagged on the console. Both checks are mechanical comparisons, not a second
+model. The real ADK loop is driven by a scripted model in CI
+(`tests/test_commander_loop.py`) precisely to exercise the ugly cases — a
+commander escalating after a failed collection, and one narrating `BENIGN_HIGH`
+over a sealed `MALICE_HIGH`.
+
+And memory cannot reach the verdict. Nothing in it is an input to the case's
+status, which is computed from the sealed chain alone — a test fills memory with
+the most persuasive lie available (every hypothesis refuted, a stand-down
+declaring the host clean, quoting a fabricated hash) and shows every seal and
+the status unchanged.
 
 **ABSTAIN is memory, not a dead end.** When the engine cannot conclude (e.g. a
 partial collection), the case records *why* it abstained and *what evidence
-would resolve it* — real working memory, not a chat log. The autonomous sweep
-reopens the case, and when a later run reaches a definitive verdict the open
-question is resolved and recorded. An investigation that survives across weeks,
-not one that forgets.
+would resolve it*, into that same fleet memory — so the next cycle pursues the
+missing evidence instead of re-collecting blind. When a later run reaches a
+definitive verdict the open question is resolved and recorded. A collection that
+*fails* is treated the same way: an unobserved endpoint is recorded as
+unobserved and retried, never as a host that was looked at and found quiet.
+
+**Published, not merely deployed.** `GET /catalog?department=soc` returns the
+fleet as one department sees it: which agents it may task, over which data
+classes, in which region, each naming the manifest hash the sealed registry
+approved. It is a gate, not a document — run a cycle as the SOC and the
+adjudication request is refused, because adjudication belongs to forensics,
+while the collection the SOC *is* cleared for proceeds.
+
+A gate is only as good as the identity in front of it, so every tasking
+resolves a principal (`agent/principal.py`): a presented Google identity token
+is verified and mapped to a department, and it wins over whatever the request
+claims — a SOC token cannot run as forensics. With no verified identity the
+department is **asserted**, and that fact is sealed into the case's journal
+beside it, so a record answers "who ran this cycle, and was that verified".
+`VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL=true` refuses asserted principals
+outright; `/health` reports which posture is live.
+
+The full compliance posture, including what the residency rule does **not**
+cover, is in [docs/COMPLIANCE.md](docs/COMPLIANCE.md).
 
 ## How it meets the hackathon requirements
 
@@ -103,7 +175,15 @@ not one that forgets.
 |-------------|-----|
 | Gemini 3.5+ | `gemini-3.5-flash` via **Vertex AI** (`GOOGLE_GENAI_USE_VERTEXAI`), through the Cloud Run service identity |
 | Google Agent Framework | **Google ADK** — two agents (investigator, mentor) |
-| Google Cloud service | **Cloud Run** (backend) + **Firestore** (case persistence) + **Vertex AI** |
+| Google Cloud service | **Cloud Run** (backend) + **Firestore** (case persistence) + **Cloud Scheduler → Pub/Sub** (unattended operation) + **Vertex AI** |
+
+Against the **Fortified Enterprise Fleet** criteria specifically:
+
+| Criterion | Where |
+|---|---|
+| Agents cataloged for cross-department use | `agent/catalog.py`, `GET /catalog?department=…` — publication, clearances and delegation, each entry naming an approved manifest hash |
+| Context maintained safely across weeks of asynchronous operation | `agent/mission.py` — tamper-evident working memory, plus per-case self-scheduling so the fleet paces itself instead of polling |
+| Production data without violating compliance, sovereignty or security | The catalog gate on every delegation, the region rule, and the founding invariant: no agent can reach the verdict. Limits stated in [docs/COMPLIANCE.md](docs/COMPLIANCE.md) |
 
 ## Run it
 
@@ -193,9 +273,23 @@ disjoint tool contracts (verified by a test, shown on `/exhibit` under **Run
 the fleet**), and a **sealed agent registry** — every agent published with a
 version and the hash of its tool manifest (same encoder that seals verdicts);
 the runtime refuses to load an agent whose manifest is not approved
-(`GET /registry`; `agent/registry.py`). Next:
+(`GET /registry`; `agent/registry.py`), **OpenTelemetry → Cloud Trace** tracing
+of the reasoning chain — a `fleet.cycle` span per unattended cycle, with a child
+span per specialist tasked, carrying the sealed verdict state, the entry hash,
+and any catalog refusal, so Cloud Trace shows the shape of an investigation
+nobody watched happen (`tests/test_tracing.py` reads the spans back to prove
+it) — and the **autonomous fleet** — an agentic
+cycle that works cases unattended, with tamper-evident mission memory, a
+per-case schedule it sets itself, and an enterprise catalog that gates every
+delegation by department, data class and region. Next:
 
-- **OpenTelemetry → Cloud Trace** for end-to-end agent-reasoning tracing.
+- **A live Velociraptor lab**, so the collection path runs against enrolled
+  Windows endpoints rather than bundled telemetry — infrastructure, not code
+  (the transport is real and proven).
+- **A Firestore transaction around the case write.** Two cycles racing one case
+  are now *detected and refused* — the loser gets a 409 and the record stays
+  intact ([Round 4](docs/RED_TEAM_AUDIT.md)) — but a transaction would turn
+  that refusal into a retry the caller never sees.
 
 ## License & attributions
 

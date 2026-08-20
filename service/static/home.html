@@ -4,202 +4,265 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>annaconda — Live Purple Team Forensics</title>
+<meta name="description" content="A live purple-team DFIR fleet whose verdicts a court could trust. The deterministic engine seals the verdict before any model speaks.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/app.css">
 <style>
-  :root{
-    --paper:#eef0f1;--paper-deep:#e4e7e8;--card:#f7f8f8;
-    --ink:#191d21;--ink-soft:#5a646c;--ink-faint:#8b949a;
-    --hairline:#c9d0d2;--hairline-2:#dbe0e1;
-    --legal:#23425e;--seal:#9e2b1e;--seal-deep:#7e2016;--sealed:#2e664b;--amber:#8a6410;
-    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  /* home-only composition */
+  .hero { padding: clamp(2.4rem, 6vw, 4.4rem) 0 clamp(2rem, 4vw, 3rem); }
+  .hero-grid { display: grid; grid-template-columns: 1.05fr .95fr; gap: clamp(1.6rem, 4vw, 3.4rem); align-items: center; }
+  @media (max-width: 880px) { .hero-grid { grid-template-columns: 1fr; } }
+  .hero h1 { max-width: 15ch; }
+  .hero .lede { margin: 1.1rem 0 1.7rem; }
+  .cta-row { display: flex; gap: .7rem; flex-wrap: wrap; }
+
+  /* the hero object: a real sealed-verdict readout */
+  .readout {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow-lg); overflow: hidden; position: relative;
   }
-  *{box-sizing:border-box;}
-  body{margin:0;background:radial-gradient(130% 90% at 50% -8%,#f5f6f7 0%,var(--paper) 40%,var(--paper-deep) 100%);
-    color:var(--ink);font-family:var(--serif);line-height:1.6;-webkit-font-smoothing:antialiased;}
-  .wrap{max-width:1000px;margin:0 auto;padding:0 clamp(1rem,4vw,2rem);}
-  a{color:var(--legal);}
-  .eyebrow{font-family:var(--sans);font-size:.66rem;letter-spacing:.32em;text-transform:uppercase;color:var(--ink-soft);margin:0;}
+  .readout .ro-top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: .6rem .9rem; border-bottom: 1px solid var(--line); background: var(--card-2);
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .readout .ro-top .live { display: inline-flex; align-items: center; gap: .4rem; color: var(--cyan-deep); }
+  .readout .ro-top .live::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--cyan);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--cyan) 60%, transparent); animation: pulse 2.2s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cyan) 55%, transparent); }
+    70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; }
+  }
+  .readout .ro-body { padding: 1.1rem 1.1rem 1.2rem; }
+  .verdict-line { display: flex; align-items: baseline; gap: .7rem; margin-bottom: .1rem; }
+  .verdict-line .state { font-family: var(--mono); font-weight: 600; font-size: 1.5rem; color: var(--malice); letter-spacing: -.01em; }
+  .verdict-line .conf { font-family: var(--mono); font-size: .74rem; color: var(--ink-faint); }
+  .verdict-sub { font-family: var(--serif); font-style: italic; color: var(--ink-soft); font-size: .92rem; margin-bottom: 1rem; }
+  .ro-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem 1.4rem; margin-bottom: 1rem; }
+  .ro-metric .l { font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); }
+  .ro-metric .v { font-family: var(--mono); font-size: .92rem; color: var(--ink); }
+  .ro-seal { border-top: 1px dashed var(--line); padding-top: .8rem; }
+  .ro-seal .l { font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: .25rem; }
+  .ro-seal .h { font-family: var(--mono); font-size: .74rem; color: var(--cyan-deep); word-break: break-all; }
+  .ro-seal .chk { display: inline-flex; align-items: center; gap: .35rem; margin-top: .5rem; font-family: var(--mono); font-size: .68rem; color: var(--benign); }
 
-  /* nav */
-  nav.top{display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;
-    padding:1.2rem clamp(1rem,4vw,2rem);max-width:1000px;margin:0 auto;}
-  nav.top .brand{font-family:var(--sans);font-weight:700;letter-spacing:.12em;font-size:.9rem;color:var(--ink);}
-  nav.top .brand span{color:var(--legal);}
-  nav.top .links{display:flex;gap:.5rem;flex-wrap:wrap;}
-  .btn{font-family:var(--sans);font-size:.72rem;letter-spacing:.13em;text-transform:uppercase;text-decoration:none;
-    border-radius:4px;padding:.6rem 1.1rem;transition:background .18s,transform .08s;display:inline-block;}
-  .btn.primary{background:var(--legal);color:#fff;} .btn.primary:hover{background:#16324a;}
-  .btn.ghost{background:#fff;color:var(--legal);border:1px solid var(--hairline);} .btn.ghost:hover{background:#eef1f4;}
-  .btn:active{transform:translateY(1px);}
-
-  /* hero */
-  .hero{display:grid;grid-template-columns:1.4fr auto;gap:2rem;align-items:center;
-    padding:clamp(2rem,6vw,4.5rem) 0 clamp(1.5rem,4vw,2.5rem);border-bottom:2px solid var(--ink);}
-  @media(max-width:720px){.hero{grid-template-columns:1fr;}}
-  h1{font-size:clamp(2.1rem,6vw,3.6rem);line-height:1.03;font-weight:600;letter-spacing:-.018em;text-wrap:balance;margin:.7rem 0 0;}
-  h1 .thin{color:var(--ink-soft);font-weight:400;font-style:italic;}
-  .lede{font-size:clamp(1.05rem,2.4vw,1.3rem);color:var(--ink-soft);max-width:34ch;margin:1.1rem 0 1.7rem;}
-  .hero-cta{display:flex;gap:.7rem;flex-wrap:wrap;}
-  .seal{width:150px;height:150px;border-radius:50%;display:grid;place-content:center;text-align:center;
-    font-family:var(--sans);color:#fff;transform:rotate(-7deg);justify-self:center;
-    background:radial-gradient(circle at 38% 32%,#b8412f,var(--seal) 46%,var(--seal-deep));
-    box-shadow:0 14px 34px -12px rgba(126,32,22,.75),0 1px 2px rgba(0,0,0,.3) inset;border:3px solid rgba(255,255,255,.22);
-    animation:stamp .6s cubic-bezier(.2,1.3,.5,1) .2s both;}
-  .seal .w{font-size:1.15rem;font-weight:700;letter-spacing:.05em;}
-  .seal .t{font-size:.66rem;letter-spacing:.16em;opacity:.85;margin-top:3px;}
-  .seal .r{font-size:.56rem;letter-spacing:.2em;opacity:.72;margin-top:7px;text-transform:uppercase;}
-  @keyframes stamp{0%{opacity:0;transform:rotate(-7deg) scale(2);}60%{opacity:1;}100%{opacity:1;transform:rotate(-7deg) scale(1);}}
-
-  section{padding:clamp(2rem,5vw,3.4rem) 0;}
-  h2{font-size:clamp(1.4rem,3.2vw,1.9rem);font-weight:600;letter-spacing:-.01em;margin:0 0 .4rem;text-wrap:balance;}
-  .sub{color:var(--ink-soft);max-width:60ch;margin:0 0 1.6rem;}
-
-  /* invariant callout */
-  .invariant{background:var(--card);border:1px solid var(--hairline);border-left:5px solid var(--legal);
-    border-radius:4px;padding:1.4rem 1.6rem;display:flex;gap:1.2rem;align-items:flex-start;flex-wrap:wrap;}
-  .invariant .big{font-size:1.15rem;max-width:52ch;}
-  .invariant b{color:var(--legal);}
+  /* the one-invariant band */
+  .invariant {
+    border-left: 3px solid var(--cyan); background: var(--card); border: 1px solid var(--line);
+    border-left-width: 3px; border-radius: var(--radius); padding: 1.2rem 1.4rem; box-shadow: var(--shadow);
+  }
+  .invariant p { margin: 0; font-size: 1.02rem; color: var(--ink-soft); max-width: 74ch; }
+  .invariant b { color: var(--ink); font-weight: 600; }
 
   /* pipeline */
-  .pipe{display:flex;gap:.6rem;align-items:stretch;overflow-x:auto;padding-bottom:.5rem;}
-  .step{flex:1 0 150px;background:var(--card);border:1px solid var(--hairline);border-radius:4px;padding:1rem 1.05rem;position:relative;}
-  .step .n{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);}
-  .step h3{font-family:var(--sans);font-size:.86rem;margin:.35rem 0 .35rem;letter-spacing:.01em;}
-  .step p{font-size:.82rem;color:var(--ink-soft);margin:0;}
-  .step.sealed{border-color:#a9c4b6;} .step.sealed .n{color:var(--sealed);}
-  .arrow{align-self:center;color:var(--ink-faint);font-size:1.1rem;flex:0 0 auto;}
-  @media(max-width:720px){.arrow{display:none;}}
+  .pipe { display: grid; grid-template-columns: repeat(5, 1fr); gap: .7rem; }
+  @media (max-width: 900px) { .pipe { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 520px) { .pipe { grid-template-columns: 1fr; } }
+  .stage { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: .9rem; position: relative; }
+  .stage .n { font-family: var(--mono); font-size: .62rem; color: var(--cyan-deep); letter-spacing: .1em; }
+  .stage .seal { float: right; font-family: var(--mono); font-size: .56rem; letter-spacing: .1em; text-transform: uppercase; color: var(--cyan); }
+  .stage h3 { font-size: .92rem; margin: .35rem 0 .3rem; }
+  .stage p { margin: 0; font-size: .8rem; color: var(--ink-soft); line-height: 1.5; }
+  .boundary { display: flex; align-items: center; gap: .8rem; margin: 1.1rem 0; }
+  .boundary .lbl { font-family: var(--mono); font-size: .64rem; letter-spacing: .14em; text-transform: uppercase; color: var(--malice); white-space: nowrap; }
+  .boundary .ln { flex: 1; height: 1px; background: repeating-linear-gradient(90deg, var(--malice) 0 8px, transparent 8px 14px); opacity: .5; }
 
-  /* two agents */
-  .agents{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;}
-  @media(max-width:640px){.agents{grid-template-columns:1fr;}}
-  .agent{background:var(--card);border:1px solid var(--hairline);border-radius:5px;padding:1.5rem 1.6rem;}
-  .agent .tag{font-family:var(--sans);font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:#fff;background:var(--legal);
-    padding:.25rem .55rem;border-radius:3px;display:inline-block;margin-bottom:.9rem;}
-  .agent.mentor .tag{background:var(--sealed);}
-  .agent h3{font-size:1.15rem;margin:0 0 .5rem;}
-  .agent p{color:var(--ink-soft);font-size:.96rem;margin:0 0 1.1rem;}
+  /* agents */
+  .agents { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  @media (max-width: 860px) { .agents { grid-template-columns: 1fr; } }
+  .agent { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem; box-shadow: var(--shadow); }
+  .agent .role { font-family: var(--mono); font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: #fff; background: var(--cyan); border-radius: 3px; padding: .22rem .5rem; display: inline-block; }
+  .agent.investigator .role { background: var(--ink-soft); }
+  .agent.mentor .role { background: var(--benign); }
+  .agent h3 { margin: .7rem 0 .4rem; }
+  .agent p { margin: 0 0 .9rem; font-size: .85rem; color: var(--ink-soft); }
 
-  /* guide */
-  .guide{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem 2rem;}
-  @media(max-width:640px){.guide{grid-template-columns:1fr;}}
-  .g{display:flex;gap:1rem;align-items:flex-start;}
-  .g .num{font-family:var(--serif);font-size:1.6rem;color:var(--legal);font-weight:600;line-height:1;flex:none;width:1.6rem;text-align:right;}
-  .g h3{font-family:var(--sans);font-size:.98rem;margin:.1rem 0 .3rem;}
-  .g p{margin:0;font-size:.92rem;color:var(--ink-soft);}
-  .g code{font-family:var(--mono);font-size:.86em;background:rgba(35,66,94,.08);padding:.05em .3em;border-radius:3px;}
+  /* signature: a case's sealed spine */
+  .record-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: clamp(1.4rem,4vw,2.6rem); align-items: center; }
+  @media (max-width: 860px) { .record-grid { grid-template-columns: 1fr; } }
+  .spine .link .se { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  .spine .link .st { font-family: var(--mono); font-weight: 600; font-size: .88rem; }
+  .spine .link .st.malice { color: var(--malice); } .spine .link .st.benign { color: var(--benign); }
+  .spine .link .st.abstain { color: var(--abstain); }
+  .spine .link .sh { font-family: var(--mono); font-size: .7rem; color: var(--ink-faint); }
+  .spine .link .sd { font-family: var(--mono); font-size: .68rem; color: var(--ink-soft); margin-top: .2rem; }
 
-  /* stack */
-  .stack{display:flex;flex-wrap:wrap;gap:.55rem;}
-  .stack span{font-family:var(--mono);font-size:.8rem;color:var(--ink);background:#fff;border:1px solid var(--hairline);
-    border-radius:3px;padding:.4rem .7rem;}
-  .stack span b{color:var(--legal);font-weight:600;}
-
-  footer{border-top:2px solid var(--ink);padding:2rem 0 3rem;color:var(--ink-faint);font-family:var(--sans);font-size:.72rem;line-height:1.6;}
-  @media(prefers-reduced-motion:reduce){*{animation:none!important;}}
+  .stack-tags { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .tour { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem 2.6rem; }
+  @media (max-width: 760px) { .tour { grid-template-columns: 1fr; } }
+  .step { display: grid; grid-template-columns: auto 1fr; gap: .9rem; }
+  .step .sn { font-family: var(--mono); font-size: 1rem; color: var(--cyan-deep); font-weight: 600; }
+  .step h3 { font-size: .95rem; margin: 0 0 .25rem; }
+  .step p { margin: 0; font-size: .84rem; color: var(--ink-soft); }
+  .step code { font-family: var(--mono); font-size: .78rem; background: var(--inset); padding: .05rem .3rem; border-radius: 3px; }
 </style>
 </head>
-<body>
-<nav class="top">
-  <div class="brand">annaconda<span>.</span></div>
-  <div class="links">
-    <a class="btn ghost" href="/console">Case queue</a>
-    <a class="btn ghost" href="/exhibit">Live exhibit</a>
-    <a class="btn ghost" href="/consult">Mentor console</a>
-    <a class="btn ghost" href="/architecture">Architecture</a>
-  </div>
-</nav>
+<body class="grid-bg">
+  <nav class="nav"><div class="nav-in">
+    <a class="brand" href="/">annaconda<span class="dot">.</span></a>
+    <div class="row">
+      <div class="nav-links">
+        <a href="/console">Case queue</a>
+        <a href="/fleet-console">Fleet</a>
+        <a href="/exhibit">Exhibit</a>
+        <a href="/consult">Mentor</a>
+        <a href="/architecture">Architecture</a>
+      </div>
+      <button class="theme" aria-label="Toggle dark mode" title="Toggle theme">◐</button>
+    </div>
+  </div></nav>
 
-<div class="wrap">
-  <header class="hero">
+  <header class="hero"><div class="wrap"><div class="hero-grid">
     <div>
-      <p class="eyebrow">Live Purple Team &middot; Deterministic DFIR</p>
-      <h1>Forensic verdicts <span class="thin">a court could trust</span> — in real time.</h1>
-      <p class="lede">annaconda analyzes an attack as it unfolds and seals a reproducible, MITRE-mapped verdict. The AI guides the investigation; it never decides it.</p>
-      <div class="hero-cta">
-        <a class="btn primary" href="/console">Open the case queue &rarr;</a>
-        <a class="btn ghost" href="/exhibit">Live exhibit</a>
+      <span class="eyebrow">Live purple-team DFIR</span>
+      <h1>Forensic verdicts <span class="claim">a court could trust</span></h1>
+      <p class="lede">annaconda watches an endpoint as an attack unfolds and seals a reproducible,
+      MITRE-mapped verdict. A fleet of Gemini agents drives and explains the investigation —
+      <span class="claim">but the language model is out of the decision path.</span></p>
+      <div class="cta-row">
+        <a class="btn btn-primary btn-lg" href="/fleet-console">Watch the fleet work &rarr;</a>
+        <a class="btn btn-ghost btn-lg" href="/exhibit">Open the live exhibit</a>
       </div>
     </div>
-    <div class="seal" aria-hidden="true">
-      <div><div class="w">SEALED</div><div class="t">SHA-256</div><div class="r">reproducible</div></div>
-    </div>
-  </header>
 
-  <section>
-    <div class="invariant">
-      <div class="big">The one invariant: <b>the language model is out of the decision path.</b> The deterministic engine produces and seals the verdict <i>before</i> any model describes it. Swap the narrator — Gemini, another model, none at all — and the verdict, its score, and its hash never change. That is what makes the result reproducible bit-for-bit, and defensible.</div>
+    <div class="readout" aria-label="Example sealed verdict">
+      <div class="ro-top">
+        <span>Sealed verdict · window 000</span>
+        <span class="live">adjudicated</span>
+      </div>
+      <div class="ro-body">
+        <div class="verdict-line">
+          <span class="state">MALICE_HIGH</span>
+          <span class="conf">confidence 9/10</span>
+        </div>
+        <div class="verdict-sub">a C2 beacon observed before its own process existed</div>
+        <div class="ro-metrics">
+          <div class="ro-metric"><div class="l">Score</div><div class="v">5569 / 10000</div></div>
+          <div class="ro-metric"><div class="l">Determinism</div><div class="v">FORENSIC</div></div>
+          <div class="ro-metric"><div class="l">MITRE ATT&amp;CK</div><div class="v"><span class="tid">T1055.012</span> <span class="tid">T1070.006</span></div></div>
+          <div class="ro-metric"><div class="l">Engine</div><div class="v">no model · no float</div></div>
+        </div>
+        <div class="ro-seal">
+          <div class="l">SHA-256 seal</div>
+          <div class="h">98224dabe11cc6c9cf3a95a5029d342aaeff8774df15ba400514fc0721107a49</div>
+          <div class="chk">✓ chain intact · reproduces bit-for-bit on replay</div>
+        </div>
+      </div>
     </div>
-  </section>
+  </div></div></header>
 
-  <section>
-    <h2>How it works</h2>
-    <p class="sub">Live endpoint telemetry is frozen into sealed evidence windows, adjudicated by a deterministic core, and chained into a tamper-evident record. Re-running the same windows reproduces every seal.</p>
+  <section class="wrap"><div class="invariant">
+    <p><b>The one invariant.</b> The deterministic engine produces and seals the verdict
+    <span class="claim">before any model describes it.</span> Swap the narrator — Gemini, another
+    model, none at all — and the verdict, its score, and its hash never change. That is what makes
+    the result reproducible bit-for-bit, and defensible.</p>
+  </div></section>
+
+  <section class="wrap section">
+    <div class="section-head">
+      <span class="eyebrow">The pipeline</span>
+      <h2>Five steps, one trust boundary</h2>
+      <p class="lede">Live telemetry is frozen into sealed evidence windows, adjudicated by a
+      deterministic core, and chained into a tamper-evident record.</p>
+    </div>
     <div class="pipe">
-      <div class="step"><div class="n">01</div><h3>Hunt</h3><p>Curated Velociraptor VQL collects endpoint telemetry. No raw queries — only vetted hunts.</p></div>
-      <div class="arrow">&rarr;</div>
-      <div class="step sealed"><div class="n">02 · sealed</div><h3>Evidence window</h3><p>Telemetry is frozen into an immutable, SHA-256-sealed window with full chain of custody.</p></div>
-      <div class="arrow">&rarr;</div>
-      <div class="step"><div class="n">03</div><h3>Adjudicate</h3><p>The deterministic core scores it — no floats, no model — and maps findings to MITRE ATT&amp;CK.</p></div>
-      <div class="arrow">&rarr;</div>
-      <div class="step sealed"><div class="n">04 · sealed</div><h3>Verdict chain</h3><p>Each verdict is sealed onto the previous one. Tamper with any link and verification fails.</p></div>
-      <div class="arrow">&rarr;</div>
-      <div class="step"><div class="n">05</div><h3>Narrate</h3><p>The agent explains the sealed verdict to the examiner — exactly, never altering it.</p></div>
+      <div class="stage"><span class="n">01</span><h3>Hunt</h3><p>Curated Velociraptor VQL collects endpoint telemetry. No raw queries — only vetted hunts.</p></div>
+      <div class="stage"><span class="n">02</span><span class="seal">sealed</span><h3>Window</h3><p>Telemetry is frozen into an immutable, SHA-256-sealed evidence window.</p></div>
+      <div class="stage"><span class="n">03</span><span class="seal">sealed</span><h3>Adjudicate</h3><p>The deterministic core scores it — no floats, no model — and maps findings to MITRE ATT&amp;CK.</p></div>
+      <div class="stage"><span class="n">04</span><span class="seal">sealed</span><h3>Chain</h3><p>Each verdict is chained onto the previous. Tamper with any link and verification fails.</p></div>
+      <div class="stage"><span class="n">05</span><h3>Narrate</h3><p>The agent explains the sealed verdict to the examiner — exactly, never altering it.</p></div>
     </div>
+    <div class="boundary"><span class="lbl">◄ trust boundary ►</span><span class="ln"></span><span class="lbl">everything left of Narrate is deterministic</span></div>
   </section>
 
-  <section>
-    <h2>Two agents, one rule</h2>
-    <p class="sub">Both are built on Google's Agent Development Kit and Gemini. Both act and explain; neither decides. The verdict is always the sealed engine's.</p>
+  <section class="wrap section">
+    <div class="section-head">
+      <span class="eyebrow">A fleet, one rule</span>
+      <h2>They act, delegate and explain. None of them decides.</h2>
+      <p class="lede">All built on Google's Agent Development Kit and Gemini. The verdict is always the sealed engine's.</p>
+    </div>
     <div class="agents">
       <div class="agent">
-        <span class="tag">Investigator</span>
+        <span class="role">Commander</span>
+        <h3>Works cases unattended</h3>
+        <p>Woken by Cloud Scheduler, it reads what earlier cycles found, tasks the specialists it is cleared to task, and decides when to look again, when a human is needed, and when to stop. It holds no collection or adjudication tool of its own — it can only task those who do.</p>
+        <a class="btn btn-ghost" href="/fleet-console">Watch a cycle &rarr;</a>
+      </div>
+      <div class="agent investigator">
+        <span class="role">Investigator</span>
         <h3>Drives the hunt</h3>
-        <p>Chooses which hunts to run, decides when to freeze and adjudicate a window, and narrates the sealed result to the examiner. It cannot pass a score or a hash — the tools give it no way to touch the verdict.</p>
-        <a class="btn ghost" href="/exhibit">Open the live exhibit &rarr;</a>
+        <p>Chooses which hunts to run, decides when to freeze and adjudicate a window, and narrates the sealed result. Its tools give it no way to pass a score or a hash — no way to touch the verdict.</p>
+        <a class="btn btn-ghost" href="/exhibit">Open the exhibit &rarr;</a>
       </div>
       <div class="agent mentor">
-        <span class="tag">Mentor</span>
+        <span class="role">Mentor</span>
         <h3>Guides junior examiners</h3>
-        <p>A patient advisor for junior peritos: explains DFIR methodology, MITRE techniques, and what each verdict state means — grounded in real knowledge, never invented. It teaches you to reason; it never concludes for you.</p>
-        <a class="btn ghost" href="/consult">Ask the mentor &rarr;</a>
+        <p>A patient advisor: explains DFIR methodology, MITRE techniques, and what each verdict state means — grounded in real knowledge, never invented. It teaches you to reason; it never concludes for you.</p>
+        <a class="btn btn-ghost" href="/consult">Ask the mentor &rarr;</a>
       </div>
     </div>
   </section>
 
-  <section>
-    <h2>Using it</h2>
-    <p class="sub">A five-minute tour of the live exhibit.</p>
-    <div class="guide">
-      <div class="g"><div class="num">1</div><div><h3>Run a sealed investigation</h3><p>On the <a href="/exhibit">exhibit</a>, press <b>Run sealed investigation</b>. annaconda freezes evidence windows and seals a verdict for each. Or press <b>Ask the agent</b> to let Gemini drive and narrate.</p></div></div>
-      <div class="g"><div class="num">2</div><div><h3>Read the verdict &amp; custody</h3><p>Each window shows its sealed state, exact score (a fraction, never a float), MITRE techniques, and the chain of custody — <code>prev → window → entry</code> hashes.</p></div></div>
-      <div class="g"><div class="num">3</div><div><h3>Replay to prove it</h3><p>Press <b>Replay &amp; re-verify seals</b>. annaconda re-derives every seal from the recorded windows and confirms <code>HASHES MATCH</code>. Determinism, demonstrated.</p></div></div>
-      <div class="g"><div class="num">4</div><div><h3>Consult the mentor</h3><p>Not sure what a verdict means or how to proceed? The <a href="/consult">mentor console</a> explains it — and reminds you that an honest <i>ABSTAIN</i> beats a confident wrong answer.</p></div></div>
+  <section class="wrap section"><div class="record-grid">
+    <div>
+      <span class="eyebrow">The record</span>
+      <h2>A case is one unbroken chain</h2>
+      <p class="lede">Every investigation run continues the case's sealed chain. Each entry commits
+      to the one before it, so the whole case verifies as a single tamper-evident record —
+      reorder, alter, or drop a link and it breaks.</p>
+      <p class="soft" style="font-size:.86rem; margin-top:1rem;">The spine on the right is that
+      structure made visible: an unbroken line is a passing verification.</p>
+    </div>
+    <div class="panel">
+      <header><span class="title">Case DEMO-MALICE · sealed chain</span><span class="pill sealed">✓ verified</span></header>
+      <div class="body">
+        <ul class="spine">
+          <li class="link"><div class="se"><span class="st benign">BENIGN_HIGH</span><span class="sh">7c2e…a41f</span></div><div class="sd">seq 0 · pslist + netstat · baseline running state</div></li>
+          <li class="link"><div class="se"><span class="st malice">MALICE_HIGH</span><span class="sh">98224d…07a49</span></div><div class="sd">seq 1 · T1055.012 + T1070.006 · process hollowing</div></li>
+          <li class="link"><div class="se"><span class="st abstain">ABSTAIN_INSUFFICIENT</span><span class="sh">fbb5f5…53dbd</span></div><div class="sd">seq 2 · partial collection · re-hunt scheduled</div></li>
+        </ul>
+      </div>
+    </div>
+  </div></section>
+
+  <section class="wrap section">
+    <div class="section-head">
+      <span class="eyebrow">Using it</span>
+      <h2>A five-minute tour</h2>
+    </div>
+    <div class="tour">
+      <div class="step"><span class="sn">1</span><div><h3>Run a sealed investigation</h3><p>On the <a href="/exhibit">exhibit</a>, press <b>Run sealed investigation</b>. annaconda freezes evidence windows and seals a verdict for each. Or let Gemini drive and narrate.</p></div></div>
+      <div class="step"><span class="sn">2</span><div><h3>Read the verdict &amp; custody</h3><p>Each window shows its sealed state, exact score (a fraction, never a float), MITRE techniques, and the chain of custody — <code>prev → window → entry</code>.</p></div></div>
+      <div class="step"><span class="sn">3</span><div><h3>Replay to prove it</h3><p>Press <b>Replay &amp; re-verify seals</b>. annaconda re-derives every seal from the recorded windows and confirms they match. Determinism, demonstrated.</p></div></div>
+      <div class="step"><span class="sn">4</span><div><h3>Watch it run itself</h3><p>On the <a href="/fleet-console">fleet console</a>, press <b>Run a cycle</b> — the code path Cloud Scheduler runs at 3am. Switch the running department and watch the catalog refuse an over-reach.</p></div></div>
     </div>
   </section>
 
-  <section>
-    <h2>Built on</h2>
-    <div class="stack">
-      <span><b>Gemini</b> via Vertex AI</span>
-      <span><b>ADK</b> — Agent Development Kit</span>
-      <span><b>Cloud Run</b></span>
-      <span><b>Velociraptor</b> live telemetry</span>
-      <span><b>MITRE ATT&amp;CK</b> v14.1</span>
-      <span>Deterministic core &middot; <b>no floats, no LLM</b></span>
-      <span>SHA-256 sealed &middot; <b>reproducible</b></span>
-      <span><b>Open source</b> &middot; Apache-2.0</span>
+  <section class="wrap section">
+    <div class="section-head"><span class="eyebrow">Built on</span></div>
+    <div class="stack-tags">
+      <span class="tag">Gemini · via Vertex AI</span>
+      <span class="tag">Google ADK</span>
+      <span class="tag">Cloud Run</span>
+      <span class="tag">Firestore</span>
+      <span class="tag">Cloud Scheduler → Pub/Sub</span>
+      <span class="tag">Velociraptor</span>
+      <span class="tag">MITRE ATT&amp;CK v14.1</span>
+      <span class="tag core">Deterministic core · no floats, no LLM</span>
+      <span class="tag ok">SHA-256 sealed · reproducible</span>
+      <span class="tag">Apache-2.0</span>
     </div>
-    <p class="sub" style="margin-top:1.1rem;">Not required by the hackathon — annaconda is open source because forensic tooling that decides on people's lives should be inspectable by anyone.</p>
   </section>
-</div>
 
-<footer>
-  <div class="wrap">
-    annaconda &middot; Live purple-team forensics &middot; the deterministic engine decides, the agent guides.<br>
+  <footer class="foot"><div class="foot-in">
+    <b>annaconda</b> — live purple-team forensics · the deterministic engine decides, the agents guide.<br>
     The verdict is sealed before any model speaks — reproducible, MITRE-mapped, tamper-evident.
-  </div>
-</footer>
+  </div></footer>
+
+  <script src="/assets/nav.js"></script>
 </body>
 </html>
