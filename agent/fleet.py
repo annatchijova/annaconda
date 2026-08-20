@@ -55,6 +55,15 @@ def persistence_tools(session: PurpleTeamSession) -> list:
     return [survey_persistence]
 
 
+def threat_intel_tools(session: PurpleTeamSession) -> list:
+    def enrich_indicators(window_id: str) -> dict:
+        """[threat-intel] Surface external threat-intel (VirusTotal / Google
+        Threat Intelligence) reputation for the indicators in a frozen window.
+        Read-only context sealed beside the evidence; it never changes a verdict."""
+        return session.enrich_indicators(window_id)
+    return [enrich_indicators]
+
+
 def correlator_tools(session: PurpleTeamSession) -> list:
     def adjudicate_window(window_id: str) -> dict:
         """[correlator] Adjudicate a frozen evidence window into a SEALED verdict
@@ -74,6 +83,9 @@ FLEET = {
                        "tools": windows_hunter_tools},
     "persistence-agent": {"role": "collects the persistence surface",
                           "tools": persistence_tools},
+    "threat-intel": {"role": "enriches window indicators with external "
+                             "threat-intel reputation (evidence, not a decider)",
+                     "tools": threat_intel_tools},
     "correlator": {"role": "adjudicates windows and verifies the sealed chain",
                    "tools": correlator_tools},
 }
@@ -118,6 +130,7 @@ def dispatch_investigation(session: PurpleTeamSession) -> dict:
     dispatch = dispatcher_tools(session)[0]
     hunt_windows = windows_hunter_tools(session)[0]
     hunt_persistence = persistence_tools(session)[0]
+    enrich = threat_intel_tools(session)[0]
     adjudicate, verify = correlator_tools(session)
 
     log = []
@@ -142,6 +155,15 @@ def dispatch_investigation(session: PurpleTeamSession) -> dict:
             log.append({"role": role, "action": "collect",
                         "window_id": summary["window_id"],
                         "artifacts": summary.get("artifacts")})
+            with _span("threat-intel.enrich",
+                       **{"fleet.role": "threat-intel",
+                          "window_id": summary["window_id"]}):
+                enrichment = enrich(summary["window_id"])
+            log.append({"role": "threat-intel", "action": "enrich",
+                        "window_id": summary["window_id"],
+                        "indicators": enrichment.get("indicators"),
+                        "flagged": enrichment.get("flagged"),
+                        "sealed_into_window": enrichment.get("sealed_into_window")})
             with _span("correlator.adjudicate",
                        **{"fleet.role": "correlator",
                           "window_id": summary["window_id"]}) as sp:

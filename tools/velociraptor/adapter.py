@@ -444,11 +444,18 @@ def window_to_case(window: dict) -> dict:
 def build_evidence_window(*, case_id: str, sequence: int, source: str,
                           host: dict, time_start_utc: str, time_end_utc: str,
                           collection: dict, artifacts: list,
-                          manifest: list) -> dict:
+                          manifest: list, enrichment: list | None = None) -> dict:
     """Freeze one immutable evidence window and seal its hash.
 
     Pure function of its inputs — no clock, no randomness, no I/O — so the
     same inputs produce a bit-identical window in any process.
+
+    ``enrichment`` is optional external threat-intel context (see
+    agent/threat_intel.py). It is sealed under its own key, *beside* the scored
+    artifacts and never among them: it is covered by ``window_hash`` (so it is
+    tamper-evident and reproducible), but ``window_to_case`` does not feed it to
+    the scorer, so it is structurally incapable of changing a verdict. Omitted
+    when empty, so a window with no enrichment is byte-identical to before.
     """
     if not _ID_RE.fullmatch(case_id or ""):
         raise AdapterError(f"invalid case_id: {case_id!r}")
@@ -483,6 +490,13 @@ def build_evidence_window(*, case_id: str, sequence: int, source: str,
         "manifest": sorted(manifest, key=lambda m: (m["path"], m["sha256"])),
         "canonicalize_version": CANONICALIZE_VERSION,
     }
+    if enrichment:
+        # Sorted for a stable seal regardless of fetch order; sealed beside the
+        # artifacts, outside the scorer feed.
+        window["enrichment"] = sorted(
+            enrichment,
+            key=lambda r: (r.get("indicator_type", ""), r.get("indicator", "")),
+        )
     window["window_hash"] = _sha256_canonical(window)
     return window
 
@@ -503,7 +517,7 @@ def collect_window(transport: Transport, *, case_id: str, sequence: int,
                    source: str, host: dict, time_start_utc: str,
                    time_end_utc: str, requests: list, examiner_id: str,
                    poll_interval_s: float = 2.0,
-                   timeout_s: float = 300.0) -> tuple[dict, list]:
+                   timeout_s: float = 300.0, enricher=None) -> tuple[dict, list]:
     """Run curated collections through a transport and freeze the window.
 
     ``requests`` is a list of ``(template_id, params)`` pairs; every pair is
@@ -560,6 +574,16 @@ def collect_window(transport: Transport, *, case_id: str, sequence: int,
         manifest.extend(flow_manifest)
         reports.append(report)
 
+    # Enrich BEFORE sealing so the reputation is cached into the sealed window;
+    # a failing enricher must never lose a valid collection, so it degrades to
+    # no enrichment rather than raising out of the collection.
+    enrichment = None
+    if enricher is not None:
+        try:
+            enrichment = enricher(artifacts)
+        except Exception:
+            enrichment = None
+
     window = build_evidence_window(
         case_id=case_id,
         sequence=sequence,
@@ -574,5 +598,6 @@ def collect_window(transport: Transport, *, case_id: str, sequence: int,
         },
         artifacts=artifacts,
         manifest=manifest,
+        enrichment=enrichment,
     )
     return window, reports

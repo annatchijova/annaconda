@@ -194,6 +194,12 @@ def architecture_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "architecture.html")
 
 
+def _threat_intel_posture() -> str:
+    """The external-enrichment backend, or 'unavailable' when no key is set."""
+    from agent.threat_intel import posture
+    return posture()
+
+
 @app.get("/health")
 def health() -> dict:
     return {
@@ -205,6 +211,10 @@ def health() -> dict:
         "sealed_verdicts": True,
         "llm_in_decision_path": False,
         "case_store": _CASE_STORE.backend,
+        # External threat-intel enrichment posture (honest degradation): the
+        # backend when a key is configured, else "unavailable". It is sealed
+        # evidence beside the verdict, never a decider — see agent/threat_intel.py.
+        "threat_intel": _threat_intel_posture(),
         "autonomous_sweeps": _SWEEP_STATE["count"],
         "last_sweep_utc": _SWEEP_STATE["last_utc"],
         # The fleet's unattended work: cycles are agent-driven, sweeps are only
