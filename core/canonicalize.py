@@ -147,6 +147,16 @@ def _canonicalize_v2(obj: Any) -> Any:
     if isinstance(obj, Fraction):
         return f"{obj.numerator}/{obj.denominator}:frac"
     if isinstance(obj, dict):
+        # Fail loud on non-string keys: json.dumps silently coerces int keys to
+        # strings, so {1: x} and {"1": x} would seal to the SAME hash (R1-1). No
+        # sealed payload today has non-string keys, so this changes no existing
+        # seal; a future one that needs them is a v3 change, not a silent
+        # collision.
+        for k in obj:
+            if not isinstance(k, str):
+                raise TypeError(
+                    f"canonical v2 refuses non-string dict key {k!r} "
+                    f"({type(k).__name__}): it would collide with its string form")
         return {k: _canonicalize_v2(v) for k, v in sorted(obj.items())}
     if isinstance(obj, (list, tuple)):
         return [_canonicalize_v2(v) for v in obj]

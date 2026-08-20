@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from fractions import Fraction
 from typing import Optional
@@ -156,11 +157,47 @@ def verify_stream(entries: list, windows: Optional[dict] = None) -> dict:
     return {"chain_ok": not errors, "entries": len(entries), "errors": errors}
 
 
+def _last_entry(stream_path) -> Optional[dict]:
+    """The last non-empty entry already in the stream file, or None if the file
+    does not exist yet or is empty."""
+    try:
+        last = None
+        with open(stream_path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if line:
+                    last = line
+    except FileNotFoundError:
+        return None
+    return json.loads(last) if last else None
+
+
 def append_entry(stream_path, entry: dict) -> None:
-    """Append one entry to a JSONL stream file (one canonical-JSON line)."""
+    """Append one entry to a JSONL stream file (one canonical-JSON line).
+
+    Continuity and durability (red-team R1-2): when the file already holds
+    entries, the new one must chain onto the last (matching ``prev_entry_hash``
+    and a contiguous ``sequence``), so a caller holding stale state cannot write
+    a silent break onto disk; and the append is flushed and ``fsync``'d before
+    returning, so a crash cannot lose a verdict the caller believes is stored.
+    A fresh/empty file accepts any entry — a session continuing an existing case
+    chains to the case head, not to this per-session file.
+    """
+    last = _last_entry(stream_path)
+    if last is not None:
+        if entry.get("prev_entry_hash") != last.get("entry_hash"):
+            raise StreamError(
+                "append_entry: entry does not chain onto the file's last entry "
+                "(stale state would write a break)")
+        if entry.get("sequence") != (last.get("sequence", -1) + 1):
+            raise StreamError(
+                f"append_entry: non-contiguous sequence {entry.get('sequence')!r} "
+                f"after {last.get('sequence')!r}")
     line = json.dumps(entry, sort_keys=True, ensure_ascii=True)
     with open(stream_path, "a", encoding="utf-8") as handle:
         handle.write(line + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def read_stream(stream_path) -> list:

@@ -18,15 +18,48 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from typing import Optional
 
 from agent.mission import (
     load_mission, new_mission, note_open_question, resolve_open_question,
 )
+from core.verdict_stream import GENESIS_HASH
 from service.chain_store import (
     ConcurrentModificationError, SegmentedChain, new_index,
 )
+
+
+def _check_continuation(case: dict, entries: list) -> None:
+    """Reject a run whose sealed entries do not chain onto the case's current
+    tail — the signature of a concurrent writer that advanced the chain after
+    this run read it (red-team R3-2). Mirrors SegmentedChain.check for the
+    in-memory backend, which stores its chain inline.
+
+    Like SegmentedChain.check, a first run into an empty case is not checked
+    (there is nothing to chain onto — the entry's own seq-0/GENESIS validity is
+    the sealer's contract, not the store's). Otherwise the first new entry must
+    be sequence-contiguous with the stored tail, and — when it declares one —
+    chain onto the stored tail's hash.
+    """
+    if not entries:
+        return
+    existing = case.get("entries") or []
+    if not existing:
+        return
+    tail = existing[-1]
+    tail_seq = tail.get("sequence", len(existing) - 1)
+    first = entries[0]
+    if first.get("sequence") != tail_seq + 1:
+        raise ConcurrentModificationError(
+            f"run sequence {first.get('sequence')!r} is not contiguous with the "
+            f"stored tail {tail_seq!r} — another writer advanced the sealed chain")
+    prev = first.get("prev_entry_hash") or first.get("prev_hash")
+    if prev and prev != tail.get("entry_hash"):
+        raise ConcurrentModificationError(
+            "run's first new entry does not chain onto the case's current tail — "
+            "it was minted against state that has since been replaced")
 
 log = logging.getLogger("annaconda.case_store")
 
@@ -200,6 +233,10 @@ class MemoryCaseStore:
 
     def __init__(self):
         self._cases: dict[str, dict] = {}
+        # Serialize writes to the same case: two concurrent runs must not both
+        # extend one sealed chain, which would break it permanently (R3-2). The
+        # lock makes each write atomic; _check_continuation rejects the loser.
+        self._lock = threading.Lock()
 
     def create_case(self, case_id: str, host: dict, examiner_id: str,
                     demo: bool = False, scenario: str = "benign") -> dict:
@@ -230,22 +267,29 @@ class MemoryCaseStore:
         return rows
 
     def apply_run(self, case_id: str, entries, verdicts, audit) -> dict:
-        case = self._cases[case_id]
-        _apply_run(case, entries, verdicts, audit)
-        return case
+        with self._lock:
+            case = self._cases[case_id]
+            _check_continuation(case, entries)
+            _apply_run(case, entries, verdicts, audit)
+            return case
 
     def save_mission(self, case_id: str, mission: dict) -> None:
-        self._cases[case_id]["mission"] = mission
+        with self._lock:
+            self._cases[case_id]["mission"] = mission
 
     def apply_cycle(self, case_id: str, entries, verdicts, audit,
                     mission: dict) -> dict:
-        case = self._cases[case_id]
-        case["mission"] = mission
-        if verdicts:
-            _apply_run(case, entries, verdicts, audit)
-        else:
-            case["updated_utc"] = _now()
-        return case
+        with self._lock:
+            case = self._cases[case_id]
+            # Mission is attached BEFORE the run so _apply_run mutates the same
+            # mission object the cycle reasoned into (one object, one chain).
+            case["mission"] = mission
+            if verdicts:
+                _check_continuation(case, entries)
+                _apply_run(case, entries, verdicts, audit)
+            else:
+                case["updated_utc"] = _now()
+            return case
 
 
 # The four lists that grow without bound on a long-running case. They are
@@ -291,19 +335,30 @@ class FirestoreCaseStore:
 
     # -- segment plumbing --------------------------------------------------
 
-    def _segments(self, case_id: str):
-        """A minimal document-collection view over this case's segments."""
+    def _segments(self, case_id: str, transaction=None):
+        """A minimal document-collection view over this case's segments.
+
+        When a Firestore ``transaction`` is supplied, reads and writes join it,
+        so a segment write and the case-document commit land atomically (R3-1).
+        Without one (the direct path, and the test double), it behaves exactly
+        as before.
+        """
         col = self._col.document(case_id).collection("chain")
 
         class _Collection:
             @staticmethod
             def read(doc_id):
-                snap = col.document(doc_id).get()
+                ref = col.document(doc_id)
+                snap = ref.get(transaction=transaction) if transaction else ref.get()
                 return snap.to_dict() if snap.exists else None
 
             @staticmethod
             def write(doc_id, data):
-                col.document(doc_id).set(data)
+                ref = col.document(doc_id)
+                if transaction is not None:
+                    transaction.set(ref, data)
+                else:
+                    ref.set(data)
 
             @staticmethod
             def ids():
@@ -315,9 +370,10 @@ class FirestoreCaseStore:
 
         return _Collection
 
-    def _append_chains(self, case_id: str, index: dict, chains: dict) -> dict:
+    def _append_chains(self, case_id: str, index: dict, chains: dict,
+                       transaction=None) -> dict:
         """Append each chain's NEW entries and return the updated index."""
-        collection = self._segments(case_id)
+        collection = self._segments(case_id, transaction=transaction)
         updated = dict(index or {})
         # Check every chain BEFORE writing any of them. A divergence found half
         # way through would leave segments written that no index references —
@@ -356,12 +412,42 @@ class FirestoreCaseStore:
 
     def _persist(self, case: dict) -> None:
         doc, chains = _split_chains(case)
-        doc["chain_index"] = self._append_chains(
-            case["case_id"], case.get("chain_index") or {}, chains)
-        self._col.document(case["case_id"]).set(doc)
-        # Keep the in-hand case consistent with what is stored, so a caller
-        # that persists twice in one request appends only what is new.
-        case["chain_index"] = doc["chain_index"]
+        case_ref = self._col.document(case["case_id"])
+
+        # Concurrency (R3-1): the segment writes and the case-document commit
+        # must land atomically, and the append must be checked against the
+        # CURRENT stored index — not the (possibly stale) one this run read — so
+        # a second writer that advanced the chain in between is rejected rather
+        # than silently overwriting a sealed run. A backend without transactions
+        # (the test double) takes the direct path: the same check runs, but with
+        # no concurrency guarantee (the doubles never exercise two writers).
+        if getattr(self._db, "transaction", None) is None:
+            doc["chain_index"] = self._append_chains(
+                case["case_id"], case.get("chain_index") or {}, chains)
+            case_ref.set(doc)
+            case["chain_index"] = doc["chain_index"]
+            return
+
+        from google.cloud import firestore  # lazy
+
+        @firestore.transactional
+        def _commit(transaction) -> dict:
+            # Re-read the committed index INSIDE the transaction. All reads must
+            # precede all writes in a Firestore transaction; _append_chains only
+            # writes, so this ordering holds.
+            snap = case_ref.get(transaction=transaction)
+            current_index = ((snap.to_dict() or {}).get("chain_index") or {}
+                             if snap.exists else {})
+            # _append_chains runs SegmentedChain.check against current_index: if
+            # another writer advanced the chain, the run's entries no longer
+            # chain onto the stored head and check raises ConcurrentModificationError.
+            new_index = self._append_chains(
+                case["case_id"], current_index, chains, transaction=transaction)
+            payload = dict(doc, chain_index=new_index)
+            transaction.set(case_ref, payload)
+            return new_index
+
+        case["chain_index"] = _commit(self._db.transaction())
 
     # -- store interface ---------------------------------------------------
 

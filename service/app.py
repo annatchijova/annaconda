@@ -518,7 +518,14 @@ def get_case_exhibit(case_id: str) -> dict:
     ``annaconda-verify`` (tools/verify_bundle.py) — a stdlib-only tool that
     imports nothing from annaconda — to confirm the chain is intact. The
     ``chain_ok`` field here is this service's own opinion; the point of the
-    exhibit is that a third party need not trust it."""
+    exhibit is that a third party need not trust it.
+
+    Scope of the guarantee (red-team R3-3): this exhibit proves INTEGRITY —
+    nothing was altered, reordered, inserted, or dropped after sealing — not
+    CORRECTNESS of the score, which would require the evidence windows (kept in
+    ephemeral collection storage) to re-run the scorer. That is the universal
+    property of a hash, not a limitation of this endpoint; the verifier WARNs
+    that window seals were not re-checked when they are absent."""
     case = _CASE_STORE.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
@@ -831,6 +838,11 @@ async def sweep(req: Request) -> dict:
     subscription delivers here; each case that is *due* gets one autonomous
     cycle. The body (a Pub/Sub push envelope) is ignored — the trigger is the
     signal."""
+    # A sealed escalation is cheap, but a sweep can run up to SWEEP_MAX_CYCLES
+    # paid agentic cycles; rate-limit the wake-up so a public caller cannot spin
+    # the fleet at will (red-team R2-1). The cron fires far below this cap.
+    if not _rate_ok("sweep"):
+        raise HTTPException(status_code=429, detail="rate limited")
     from datetime import datetime, timezone
     # A Pub/Sub push subscription can be configured to present an OIDC token;
     # when it is, the cron runs as a verified identity like any operator. When
@@ -1111,9 +1123,15 @@ class ConsultRequest(BaseModel):
 async def consult(req: ConsultRequest) -> dict:
     """One turn with the mentor agent. Pass the returned session_id back on the
     next call to keep the conversation (the junior examiner's follow-ups)."""
+    # Public and paid: each turn is a Gemini call. Rate-limit like every other
+    # model-touching route so a caller cannot burn the quota (red-team R2-1).
+    if not _rate_ok("consult"):
+        raise HTTPException(status_code=429, detail="rate limited")
     from google.genai import types
     runner = _get_consult_runner()
-    sid = req.session_id or uuid.uuid4().hex[:12]
+    # Bound the session id a caller controls, so it cannot be used to grow
+    # _consult_sessions without limit.
+    sid = (req.session_id or uuid.uuid4().hex[:12])[:64]
     if sid not in _consult_sessions:
         await runner.session_service.create_session(
             app_name=CONSULT_APP, user_id="perito", session_id=sid)

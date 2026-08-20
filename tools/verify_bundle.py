@@ -99,6 +99,13 @@ def _canon_v2(obj):
     if isinstance(obj, Fraction):
         return f"{obj.numerator}/{obj.denominator}:frac"
     if isinstance(obj, dict):
+        # Lockstep with the producer: non-string keys are refused (they would
+        # collide with their string form under json.dumps — R1-1).
+        for k in obj:
+            if not isinstance(k, str):
+                raise TypeError(
+                    f"canonical v2 refuses non-string dict key {k!r} "
+                    f"({type(k).__name__}): it would collide with its string form")
         return {k: _canon_v2(v) for k, v in sorted(obj.items())}
     if isinstance(obj, (list, tuple)):
         return [_canon_v2(v) for v in obj]

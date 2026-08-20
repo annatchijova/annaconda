@@ -71,6 +71,22 @@ gcloud run services update vigia-live --region us-central1 \
   --update-env-vars GOOGLE_CLOUD_LOCATION=global --project vigia-497422
 ```
 
+## Hardening notes (external red-team Round 1)
+
+See `docs/RED_TEAM_AUDIT_ROUND1_EXTERNAL.md` for the full audit. The P1/P2 findings
+are fixed in code. Two P3 items are operational and left to the deployment:
+
+- **Rate limiting is global per endpoint, not per client** (R1-3). One caller can
+  exhaust an endpoint's quota for everyone on that instance. For a public demo,
+  either raise `VIGIA_RATE_MAX` / `VIGIA_RATE_WINDOW_S`, or front the service with a
+  per-client limiter. The model-touching routes (`/consult`, `/tasks/sweep`,
+  `/investigate`, `/cases/{id}/cycle`) are all rate-limited; the caller-controlled
+  `session_id` is bounded.
+- **In-memory growth** (R1-4): per-investigation tempdirs and `_STORE` are not
+  reaped. On Cloud Run they reset when the instance recycles; for a long-lived
+  instance, restart periodically or add a reaper. No attacker-controlled unbounded
+  growth remains (the `session_id` cap closed that).
+
 ## Endpoints
 
 Live URL: `https://vigia-live-1028999311218.us-central1.run.app`

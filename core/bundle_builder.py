@@ -134,6 +134,13 @@ def _canonicalize_v2(obj: Any) -> Any:
     if isinstance(obj, _Fraction):
         return f"{obj.numerator}/{obj.denominator}:frac"
     if isinstance(obj, dict):
+        # Non-string keys would collide with their string form under json.dumps
+        # (R1-1); reject them fail-loud. Lockstep with core/canonicalize.py.
+        for k in obj:
+            if not isinstance(k, str):
+                raise TypeError(
+                    f"canonical v2 refuses non-string dict key {k!r} "
+                    f"({type(k).__name__}): it would collide with its string form")
         return {k: _canonicalize_v2(v) for k, v in sorted(obj.items())}
     if isinstance(obj, (list, tuple)):
         return [_canonicalize_v2(v) for v in obj]
