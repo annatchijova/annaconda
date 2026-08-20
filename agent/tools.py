@@ -244,7 +244,7 @@ class PurpleTeamSession:
         window = self._windows.get(window_id)
         if window is None:
             return {"error": f"unknown window_id {window_id!r}; run_hunt first"}
-        from agent import threat_intel
+        from agent import threat_intel, misp_feed
         sealed = window.get("enrichment")
         if sealed is not None:
             out = threat_intel.summarize(sealed)
@@ -253,6 +253,11 @@ class PurpleTeamSession:
             records = threat_intel.enrich(window.get("artifacts", []))
             out = threat_intel.summarize(records)
             out["sealed_into_window"] = False
+        # The organization's own MISP/OpenCTI matches are surfaced alongside the
+        # public reputation (read-only; they are sealed evidence, never a decider).
+        misp = misp_feed.enrich(window.get("artifacts", []))
+        if misp:
+            out["misp"] = misp_feed.summarize(misp)
         out["window_id"] = window_id
         self._audit("enrich_indicators",
                     {"window_id": window_id, "indicators": out.get("indicators"),

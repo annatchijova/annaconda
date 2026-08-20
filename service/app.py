@@ -205,6 +205,12 @@ def _threat_intel_posture() -> str:
     return posture()
 
 
+def _misp_posture() -> str:
+    """The organization MISP/OpenCTI feed posture, or 'unavailable' when unset."""
+    from agent.misp_feed import posture
+    return posture()
+
+
 @app.get("/health")
 def health() -> dict:
     return {
@@ -220,6 +226,8 @@ def health() -> dict:
         # backend when a key is configured, else "unavailable". It is sealed
         # evidence beside the verdict, never a decider — see agent/threat_intel.py.
         "threat_intel": _threat_intel_posture(),
+        # The organization's own MISP/OpenCTI feed size, or 'unavailable'.
+        "misp_feed": _misp_posture(),
         # Where sealed verdicts are pushed for SIEM ingestion, or 'unavailable'.
         # Downstream of the seal; a delivery failure never discards a verdict.
         "secops_push": _SECOPS.posture(),

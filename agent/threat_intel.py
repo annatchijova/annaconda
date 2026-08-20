@@ -216,6 +216,24 @@ def make_enricher(*, fetcher=None, source: str | None = None):
     return _enricher
 
 
+def combine_enrichers(enrichers):
+    """Compose several enrichers into one for the collect_window seam. Each runs
+    independently; a failing source degrades to nothing rather than losing the
+    others (or the collection). Observations carry a ``source``, so a consumer can
+    tell VirusTotal reputation from MISP matches in the sealed window."""
+    sources = [e for e in enrichers if e is not None]
+
+    def _combined(artifacts: list) -> list:
+        out = []
+        for enricher in sources:
+            try:
+                out.extend(enricher(artifacts) or [])
+            except Exception:  # one source failing must not lose the others
+                continue
+        return out
+    return _combined
+
+
 def summarize(records: list) -> dict:
     """A compact, human/agent-facing summary of an enrichment set (read-only)."""
     available = [r for r in records if r.get("available")]

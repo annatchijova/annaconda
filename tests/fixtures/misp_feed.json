@@ -1,0 +1,13 @@
+{
+  "indicators": [
+    {"type": "ip-dst", "value": "198.51.100.7", "threat_level_id": 1,
+     "tags": ["tlp:amber", "apt29"], "event_info": "Cozy Bear C2 infrastructure",
+     "event_id": "1481"},
+    {"type": "sha256",
+     "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+     "threat_level_id": 2, "tags": [{"name": "ransomware"}],
+     "event_info": "Known dropper", "event_id": "1490"},
+    {"type": "domain", "value": "evil.example.test", "threat_level_id": 3,
+     "tags": ["phishing"], "event_info": "Phishing kit", "event_id": "1502"}
+  ]
+}

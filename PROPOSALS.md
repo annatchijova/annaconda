@@ -89,18 +89,27 @@ fabricated delivery.
 - **Google / community value:** completes the Google-native loop — unattended
   detection → sealed verdict → SecOps — reusing the autonomous sweep's Pub/Sub wiring.
 
+### MISP / OpenCTI feed ingestion to seed enrichment context
+`agent/misp_feed.py` matches a window's indicators against the organization's own
+MISP / OpenCTI export (threat level, tags, the event that recorded them) and seals
+the matches into the window beside the scored artifacts — the same discipline as
+the VirusTotal enrichment, composed with it via `combine_enrichers` so a window
+carries both the public reputation and the team's own picture, each tagged by
+source. A match is sealed evidence, never a decider: it is tamper-evident and
+reproducible yet the scorer never reads it. Honest degradation — no
+`MISP_FEED_PATH` means `misp_feed: "unavailable"` on `/health`, never a fabricated
+match.
+- **Google / community value:** meets DFIR teams where their intel already lives —
+  the community runs MISP; OpenCTI exports the same shape.
+
 ---
 
 ## Proposed
 
-### G — MISP / OpenCTI ingestion to seed enrichment context
-**What.** Pull an organization's own MISP / OpenCTI indicators to seed the
-enrichment specialist, so a window is enriched against *the team's* threat picture,
-not only the public VT verdict.
-**Why.** Meets DFIR teams where their intel already lives; the community runs MISP.
-**Invariant.** Same discipline as VT: ingested indicators are cached into the
-sealed window as evidence at collection time; they inform context, never the score.
-**Effort.** Medium. A read-only MISP client + the existing enrichment seam.
+The original roadmap has fully shipped. Natural next directions, when there is
+appetite: a CACAO 2.0 *executable* playbook (not only a record), Chronicle UDM
+export alongside STIX, and signing the exhibit bundle with Sigstore/cosign for
+supply-chain-grade provenance. None is required for the current submission.
 
 ---
 
