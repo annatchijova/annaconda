@@ -64,6 +64,15 @@ def threat_intel_tools(session: PurpleTeamSession) -> list:
     return [enrich_indicators]
 
 
+def detection_engineer_tools(session: PurpleTeamSession) -> list:
+    def synthesize_detection(window_id: str) -> dict:
+        """[detection-engineer] Turn a sealed MALICE window into portable Sigma
+        draft rules (status: experimental). Derived deterministically from the
+        sealed evidence; a model never authors the detection logic."""
+        return session.synthesize_detection(window_id)
+    return [synthesize_detection]
+
+
 def correlator_tools(session: PurpleTeamSession) -> list:
     def adjudicate_window(window_id: str) -> dict:
         """[correlator] Adjudicate a frozen evidence window into a SEALED verdict
@@ -88,6 +97,9 @@ FLEET = {
                      "tools": threat_intel_tools},
     "correlator": {"role": "adjudicates windows and verifies the sealed chain",
                    "tools": correlator_tools},
+    "detection-engineer": {"role": "turns a sealed MALICE window into portable "
+                                   "Sigma draft rules",
+                           "tools": detection_engineer_tools},
 }
 
 _SPECIALIST_INSTRUCTION = (
@@ -131,6 +143,7 @@ def dispatch_investigation(session: PurpleTeamSession) -> dict:
     hunt_windows = windows_hunter_tools(session)[0]
     hunt_persistence = persistence_tools(session)[0]
     enrich = threat_intel_tools(session)[0]
+    synthesize = detection_engineer_tools(session)[0]
     adjudicate, verify = correlator_tools(session)
 
     log = []
@@ -176,6 +189,15 @@ def dispatch_investigation(session: PurpleTeamSession) -> dict:
                             "window_id": summary["window_id"],
                             "verdict_state": verdict["verdict_state"],
                             "mitre_techniques": verdict.get("mitre_techniques", [])})
+                # A sealed MALICE window becomes a shareable detection draft; a
+                # benign window yields none (honest — nothing to share).
+                with _span("detection-engineer.synthesize",
+                           **{"fleet.role": "detection-engineer",
+                              "window_id": summary["window_id"]}):
+                    detection = synthesize(summary["window_id"])
+                log.append({"role": "detection-engineer", "action": "synthesize",
+                            "window_id": summary["window_id"],
+                            "sigma_rules": detection.get("count", 0)})
 
         with _span("correlator.verify_custody"):
             chain = verify()

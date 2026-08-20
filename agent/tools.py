@@ -260,6 +260,39 @@ class PurpleTeamSession:
                      "sealed_into_window": out["sealed_into_window"]})
         return out
 
+    def synthesize_detection(self, window_id: str) -> dict:
+        """Synthesize portable Sigma draft rules from a sealed MALICE window.
+
+        Read-only. Derives detection rules deterministically from the window's
+        sealed evidence and its sealed verdict — no model authors the logic, and
+        this cannot change any sealed value. A non-MALICE verdict yields no rule.
+        The rules are drafts (status: experimental) for a human to review.
+        """
+        window = self._windows.get(window_id)
+        if window is None:
+            return {"error": f"unknown window_id {window_id!r}; run_hunt first"}
+        from verdict.sigma_export import window_to_sigma_rules, to_yaml
+        verdict = None
+        for entry in self._entries:
+            if entry.get("window_hash") == window.get("window_hash"):
+                verdict = entry.get("verdict")
+                break
+        rules = window_to_sigma_rules(window, verdict=verdict)
+        out = {
+            "window_id": window_id,
+            "rules": rules,
+            "yaml": [to_yaml(r) for r in rules],
+            "count": len(rules),
+            "posture": ("machine-suggested DRAFT rules (status: experimental); "
+                        "a human must review and generalize before deploying"),
+        }
+        if not rules:
+            out["note"] = ("no detection synthesized: the sealed verdict is not "
+                           "MALICE/ESCALATE, or no mappable selectors were present")
+        self._audit("synthesize_detection",
+                    {"window_id": window_id, "rules": len(rules)})
+        return out
+
     def verify_chain(self) -> dict:
         """Verify the integrity of the sealed verdict chain so far.
 

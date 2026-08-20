@@ -50,6 +50,20 @@ A third party can run it on an air-gapped machine without trusting this service.
 - **Google / community value:** the Daubert posture made runnable — the guarantee
   is worth more precisely because someone who distrusts you can check it themselves.
 
+### Sigma rule synthesis from a sealed MALICE window
+`verdict/sigma_export.py` turns a sealed MALICE/ESCALATE window into portable
+Sigma draft rules: one per evidence type, tagged with the sealed verdict's MITRE
+techniques, with selectors built only from stable identifying fields (Image,
+ParentImage, User, DestinationIp, CommandLine, TargetFilename, EventID) — volatile
+fields are dropped. It is a deterministic projection of the sealed evidence (no
+model authors the logic; ids are uuid5 over the seal), and it ships behind an
+honest draft posture: `status: experimental`, an author note, and a false-positive
+line telling the analyst to review and generalize before deploying. A non-MALICE
+verdict yields no rule. Exposed as the `detection-engineer` fleet specialist,
+gated by the catalog like every other agent.
+- **Google / community value:** Sigma is the community lingua franca for
+  detections; this closes the loop from "we caught it here" to a shareable rule.
+
 ---
 
 ## Proposed
@@ -66,20 +80,6 @@ other tools, not just observable in its own console.
 verdict chain, references the seals, no model in the path. A CACAO step *records* a
 sealed decision; it never re-decides.
 **Effort.** Small–medium. Reuses the STIX id/timestamp discipline.
-
-### D — Sigma rule synthesis from a MALICE window
-**What.** When the core seals a MALICE verdict, derive a portable **Sigma**
-detection rule from the *sealed* evidence (the artifact fields and MITRE techniques
-that fired), so the detection that caught this host can be shared and deployed
-fleet-wide.
-**Why.** Sigma is the community lingua franca for detections; this closes the loop
-from "we caught it here" to "nobody gets caught by it again," which is the outcome
-a SOC actually wants.
-**Invariant.** The rule is generated *from* the sealed window by a deterministic
-template over the sealed fields — no model authoring detection logic. The Sigma
-rule is an artifact of the verdict, not an input to it. Ship it behind a `WARN`
-posture: a machine-suggested rule is a draft for a human to approve, and it says so.
-**Effort.** Medium. Needs a curated field→Sigma mapping, kept deterministic.
 
 ### F — Sealed-verdict push to Google SecOps (Chronicle) over Pub/Sub
 **What.** On each sealed escalation, publish the STIX bundle to a Pub/Sub topic a

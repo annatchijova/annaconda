@@ -49,6 +49,7 @@ _APPROVED_MANIFESTS = [
     manifest("windows-hunter", REGISTRY_VERSION, ["survey_running_state"]),
     manifest("persistence-agent", REGISTRY_VERSION, ["survey_persistence"]),
     manifest("threat-intel", REGISTRY_VERSION, ["enrich_indicators"]),
+    manifest("detection-engineer", REGISTRY_VERSION, ["synthesize_detection"]),
     manifest("correlator", REGISTRY_VERSION, ["adjudicate_window", "verify_custody"]),
     manifest("vigia_purple_team", REGISTRY_VERSION,
              ["list_available_hunts", "run_hunt", "adjudicate", "verify_chain"]),

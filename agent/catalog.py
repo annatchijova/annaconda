@@ -105,6 +105,18 @@ _CATALOG = {
         "reaches_sealed_core": False,
         "writes_case_memory": False,
     },
+    "detection-engineer": {
+        "department": "forensics",
+        "purpose": ("Turns a sealed MALICE window into portable Sigma draft "
+                    "rules (experimental; for human review). Reads the sealed "
+                    "verdict and the window telemetry; it does not adjudicate."),
+        "available_to": ["forensics", "incident-response", "soc"],
+        "tools": ["synthesize_detection"],
+        "data_classes": ["endpoint_telemetry", "persistence_artifacts",
+                         "sealed_verdicts"],
+        "reaches_sealed_core": False,
+        "writes_case_memory": False,
+    },
     "correlator": {
         "department": "forensics",
         "purpose": "Adjudicates frozen windows and verifies the sealed chain.",
