@@ -194,6 +194,12 @@ def architecture_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "architecture.html")
 
 
+def _threat_intel_posture() -> str:
+    """The external-enrichment backend, or 'unavailable' when no key is set."""
+    from agent.threat_intel import posture
+    return posture()
+
+
 @app.get("/health")
 def health() -> dict:
     return {
@@ -205,6 +211,10 @@ def health() -> dict:
         "sealed_verdicts": True,
         "llm_in_decision_path": False,
         "case_store": _CASE_STORE.backend,
+        # External threat-intel enrichment posture (honest degradation): the
+        # backend when a key is configured, else "unavailable". It is sealed
+        # evidence beside the verdict, never a decider — see agent/threat_intel.py.
+        "threat_intel": _threat_intel_posture(),
         "autonomous_sweeps": _SWEEP_STATE["count"],
         "last_sweep_utc": _SWEEP_STATE["last_utc"],
         # The fleet's unattended work: cycles are agent-driven, sweeps are only
@@ -429,6 +439,20 @@ def get_case(case_id: str) -> dict:
     chain = verify_stream(case.get("entries", []))
     return {"case": case, "chain_ok": chain["chain_ok"],
             "chain_errors": chain["errors"], "persistence": _CASE_STORE.backend}
+
+
+@app.get("/cases/{case_id}/stix")
+def get_case_stix(case_id: str) -> dict:
+    """The sealed case as a STIX 2.1 bundle — for a SIEM, a TIP (MISP), or a
+    court exhibit. Pure output of the seal: the entry_hash chain is referenced,
+    not recomputed, so a consumer can re-verify it. Deterministic (uuid5 ids,
+    timestamps from the record), so re-exporting the same case is byte-identical."""
+    from verdict.stix_export import case_to_stix
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    chain = verify_stream(case.get("entries", []))
+    return case_to_stix(case, chain_ok=chain["chain_ok"])
 
 
 @app.post("/cases/{case_id}/investigate")

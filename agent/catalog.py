@@ -41,6 +41,7 @@ DATA_CLASSES = frozenset({
     "sealed_verdicts",        # adjudicated, sealed results
     "case_memory",            # the fleet's own working memory
     "reference_material",     # MITRE mappings, verdict-state definitions
+    "external_enrichment",    # third-party reputation (VirusTotal / GTI) as sealed evidence
 })
 
 # The departments this deployment publishes to.
@@ -88,6 +89,19 @@ _CATALOG = {
         "available_to": ["soc", "incident-response"],
         "tools": ["survey_persistence"],
         "data_classes": ["persistence_artifacts"],
+        "reaches_sealed_core": False,
+        "writes_case_memory": False,
+    },
+    "threat-intel": {
+        "department": "soc",
+        "purpose": ("Enriches a window's indicators with external threat-intel "
+                    "(VirusTotal / Google Threat Intelligence) reputation, sealed "
+                    "beside the evidence as context — never a verdict input."),
+        "available_to": ["soc", "incident-response", "forensics"],
+        "tools": ["enrich_indicators"],
+        # It reads external reputation only; it is cleared for neither raw
+        # telemetry nor sealed verdicts, and it cannot reach the core.
+        "data_classes": ["external_enrichment"],
         "reaches_sealed_core": False,
         "writes_case_memory": False,
     },

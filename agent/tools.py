@@ -62,10 +62,16 @@ class PurpleTeamSession:
                  examiner_id: str, out_dir: str | Path,
                  source: str = "velociraptor",
                  time_base: Optional[str] = None, interval_s: int = 60,
-                 start_sequence: int = 0, start_prev_hash: str = GENESIS_HASH):
+                 start_sequence: int = 0, start_prev_hash: str = GENESIS_HASH,
+                 enricher=None):
         if not examiner_id or not examiner_id.strip():
             raise ValueError("examiner_id is required (chain of custody)")
         self.transport = transport
+        # Optional external threat-intel enricher (agent/threat_intel.py). When
+        # set, its reputation is sealed INTO each window at collection time, so
+        # replay reads the cached value and never makes a live call. None keeps
+        # windows byte-identical to the un-enriched path.
+        self.enricher = enricher
         self.case_id = case_id
         self.host = dict(host)
         self.examiner_id = examiner_id.strip()
@@ -153,6 +159,7 @@ class PurpleTeamSession:
                 source=self.source, host=self.host,
                 time_start_utc=start, time_end_utc=end,
                 examiner_id=self.examiner_id, requests=requests,
+                enricher=self.enricher,
             )
         except AdapterError as exc:
             # A hunt that cannot be collected must not crash the investigation
@@ -224,6 +231,34 @@ class PurpleTeamSession:
         }
         self._audit("adjudicate", verdict)
         return verdict
+
+    def enrich_indicators(self, window_id: str) -> dict:
+        """Surface the external threat-intel enrichment for a frozen window.
+
+        Read-only. If the window was sealed with enrichment (the cached, tamper-
+        evident reputation), that sealed record is returned as-is. Otherwise the
+        indicators are enriched on demand for context. Either way this CANNOT
+        change a sealed value: reputation is evidence beside the verdict, never a
+        decider, and adjudication does not read it.
+        """
+        window = self._windows.get(window_id)
+        if window is None:
+            return {"error": f"unknown window_id {window_id!r}; run_hunt first"}
+        from agent import threat_intel
+        sealed = window.get("enrichment")
+        if sealed is not None:
+            out = threat_intel.summarize(sealed)
+            out["sealed_into_window"] = True
+        else:
+            records = threat_intel.enrich(window.get("artifacts", []))
+            out = threat_intel.summarize(records)
+            out["sealed_into_window"] = False
+        out["window_id"] = window_id
+        self._audit("enrich_indicators",
+                    {"window_id": window_id, "indicators": out.get("indicators"),
+                     "flagged": out.get("flagged"),
+                     "sealed_into_window": out["sealed_into_window"]})
+        return out
 
     def verify_chain(self) -> dict:
         """Verify the integrity of the sealed verdict chain so far.
