@@ -19,11 +19,21 @@ Google Agent Framework (ADK), and a Google Cloud service (Cloud Run).
 ## Prerequisites
 
 - A Google Cloud project with billing (`vigia-497422`).
-- Enabled APIs: `run`, `aiplatform`, `cloudbuild`, `artifactregistry`.
+- Enabled APIs: `run`, `aiplatform`, `cloudbuild`, `artifactregistry`,
+  `firestore`, and — for the autonomous sweep — `pubsub` and
+  `cloudscheduler`.
   ```bash
   gcloud services enable run.googleapis.com aiplatform.googleapis.com \
       cloudbuild.googleapis.com artifactregistry.googleapis.com \
-      --project vigia-497422
+      firestore.googleapis.com pubsub.googleapis.com \
+      cloudscheduler.googleapis.com --project vigia-497422
+  ```
+- A Firestore database, because that is where a case's mission memory and its
+  two hash chains live between cycles. Without one the service still starts —
+  it degrades to memory and logs that it did — but nothing survives a restart,
+  which is exactly the claim the fleet rests on.
+  ```bash
+  gcloud firestore databases create --location nam5 --project vigia-497422
   ```
 
 ## Deploy
@@ -34,9 +44,20 @@ gcloud run deploy vigia-live \
   --region us-central1 \
   --allow-unauthenticated \
   --memory 1Gi --cpu 1 --timeout 300 \
-  --set-env-vars GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_LOCATION=global \
+  --set-env-vars GOOGLE_CLOUD_PROJECT=vigia-497422,\
+GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_LOCATION=global \
   --project vigia-497422
 ```
+
+### Gotcha: `GOOGLE_CLOUD_PROJECT` is not set for you
+
+Cloud Run injects `PORT`, `K_SERVICE` and friends, but **not**
+`GOOGLE_CLOUD_PROJECT`. The case store reads it to reach Firestore, and when it
+is absent the store degrades to memory rather than guessing — honestly, with a
+warning in the log, but a service that looks healthy. The symptom on camera is
+`/health` reporting `"case_store": "memory"`, mission memory that resets on
+every cold start, and a fleet that cannot claim continuity across weeks.
+Set it explicitly, as above, and confirm on `/health` before recording.
 
 ### Gotcha: Vertex location for Gemini 3.x is `global`, not a region
 
@@ -136,9 +157,12 @@ reports `requires_authenticated_principal`.
 - The service is deployed `--allow-unauthenticated` for the demo. Agent-mode
   requests trigger billed Vertex calls, so add authentication or rate limiting
   before sharing the URL widely.
-- State is in-memory per instance. For shared, durable state across instances,
-  move the verdict stream to Firestore (the seal is unchanged; only where it
-  is stored differs). Cloud Run alone already satisfies the Google Cloud
-  requirement, so Firestore is an enhancement, not a blocker.
+- State lives in Firestore whenever `GOOGLE_CLOUD_PROJECT` is set and the
+  database is reachable; otherwise the service says so on `/health`
+  (`"case_store": "memory"`) and keeps running without durability. The two hash
+  chains are stored in bounded segments, so a long-running case is not capped
+  by Firestore's 1 MiB per-document limit — which a host under an adjudicated
+  malicious verdict, re-checked hourly, would otherwise reach in about eleven
+  days.
 - Demo evidence is bundled (`tests/fixtures/velociraptor`); swap in the live
   Velociraptor `RestTransport` once a lab endpoint exists.
