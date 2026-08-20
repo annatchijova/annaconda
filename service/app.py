@@ -455,6 +455,25 @@ def get_case_stix(case_id: str) -> dict:
     return case_to_stix(case, chain_ok=chain["chain_ok"])
 
 
+@app.get("/cases/{case_id}/cacao")
+def get_case_cacao(case_id: str) -> dict:
+    """The autonomous investigation as an OASIS CACAO 2.0 playbook — for a SOAR
+    platform or Google SecOps. Pure output of the sealed mission journal and
+    verdict chain: steps are sealed journal entries in order, collection steps
+    reference the sealed verdict they produced, and ids are uuid5 over the seals,
+    so re-exporting the same case is byte-identical."""
+    from verdict.cacao_export import case_to_cacao
+    from agent.mission import verify_mission
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    chain = verify_stream(case.get("entries", []))
+    mission = case.get("mission") or {}
+    mem = verify_mission(mission) if mission else {"memory_ok": None}
+    return case_to_cacao(case, mission_ok=mem.get("memory_ok"),
+                         chain_ok=chain["chain_ok"])
+
+
 @app.get("/cases/{case_id}/exhibit")
 def get_case_exhibit(case_id: str) -> dict:
     """A self-contained exhibit bundle for independent, offline verification.

@@ -64,22 +64,21 @@ gated by the catalog like every other agent.
 - **Google / community value:** Sigma is the community lingua franca for
   detections; this closes the loop from "we caught it here" to a shareable rule.
 
+### CACAO 2.0 playbook export of an autonomous investigation — `GET /cases/{id}/cacao`
+`verdict/cacao_export.py` projects the sealed mission journal into an OASIS CACAO
+2.0 playbook: each workflow step is a sealed journal entry, in order (begin cycle,
+form hypothesis, collect sealed window, open/settle a line of inquiry, escalate,
+stand down); collection steps reference the sealed verdict they produced and
+escalation steps carry their sealed basis. Pure output of the seal — ids are
+uuid5 over the seals, timestamps come from the record, so re-export is
+byte-identical, and a step records a sealed decision, it never re-decides.
+- **Google / community value:** CACAO is the OASIS standard SOAR platforms and
+  Google SecOps consume; it makes the fleet's autonomy auditable and repeatable by
+  other tools, not just observable in its own console.
+
 ---
 
 ## Proposed
-
-### C — CACAO 2.0 playbook export of an autonomous investigation
-**What.** Turn one autonomous cycle (the commander's tasking → collection →
-adjudication → escalation decisions) into an OASIS **CACAO 2.0** response playbook:
-a portable, machine-readable record of *what the fleet did and why*, with the
-sealed verdicts as the decision points.
-**Why.** CACAO is the OASIS standard for security playbooks; SOAR platforms and
-Google SecOps consume it. It makes annaconda's autonomy auditable and repeatable by
-other tools, not just observable in its own console.
-**Invariant.** Pure export, like STIX: derived from the sealed mission journal and
-verdict chain, references the seals, no model in the path. A CACAO step *records* a
-sealed decision; it never re-decides.
-**Effort.** Small–medium. Reuses the STIX id/timestamp discipline.
 
 ### F — Sealed-verdict push to Google SecOps (Chronicle) over Pub/Sub
 **What.** On each sealed escalation, publish the STIX bundle to a Pub/Sub topic a
