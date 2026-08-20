@@ -119,6 +119,35 @@ curl -X POST "$URL/cases/<case-id>/cycle" -H 'content-type: application/json' \
 curl "$URL/cases/<case-id>/mission"      # the memory it left for the next cycle
 ```
 
+## Pushing sealed verdicts to Google SecOps (Chronicle) over Pub/Sub
+
+On every sealed escalation (and on demand via `POST /cases/{id}/push-to-secops`)
+the case's STIX 2.1 bundle is published to a Pub/Sub topic a Chronicle feed can
+subscribe to. It is downstream of the seal: a delivery failure is reported, never
+discards the sealed verdict. Without the topic env var — or the client — the
+pusher is honestly `unavailable` on `/health`, so the feature is off by default.
+
+To turn it on, create the topic, let the Cloud Run service account publish to it,
+and point the service at it (no rebuild needed — the `google-cloud-pubsub` client
+is already in `requirements.txt`):
+
+```bash
+TOPIC=annaconda-sealed-verdicts
+SA=1028999311218-compute@developer.gserviceaccount.com   # the Cloud Run runtime SA
+gcloud pubsub topics create $TOPIC --project vigia-497422
+gcloud pubsub topics add-iam-policy-binding $TOPIC --project vigia-497422 \
+  --member="serviceAccount:$SA" --role="roles/pubsub.publisher"
+# Point Chronicle's feed at a subscription on $TOPIC; for a smoke test, a pull one:
+gcloud pubsub subscriptions create annaconda-secops-demo --topic $TOPIC --project vigia-497422
+
+gcloud run services update vigia-live --region us-central1 --project vigia-497422 \
+  --update-env-vars SECOPS_PUBSUB_TOPIC=$TOPIC
+```
+
+Confirm `/health` reports `"secops_push": "pubsub:annaconda-sealed-verdicts"`, then
+`POST /cases/DEMO-CRON-01/push-to-secops` and pull the subscription to see the
+STIX bundle arrive with `format=stix-2.1` / `worst_verdict` attributes.
+
 ```bash
 gcloud pubsub topics create annaconda-sweeps --project <project>
 gcloud pubsub subscriptions create annaconda-sweep-push \
