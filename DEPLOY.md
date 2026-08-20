@@ -148,6 +148,29 @@ Confirm `/health` reports `"secops_push": "pubsub:annaconda-sealed-verdicts"`, t
 `POST /cases/DEMO-CRON-01/push-to-secops` and pull the subscription to see the
 STIX bundle arrive with `format=stix-2.1` / `worst_verdict` attributes.
 
+## Seeding enrichment with the organization's own MISP / OpenCTI feed
+
+A window's indicators are matched against the team's own intel and the matches are
+sealed *beside* the evidence (never among it, so they cannot move a verdict). Point
+`MISP_FEED_PATH` at a MISP attribute export / OpenCTI observable export
+(`{"indicators": [{type, value, threat_level_id, tags, event_info, event_id}, ...]}`);
+absent, `/health` reports `"misp_feed": "unavailable"`.
+
+The image ships a clearly-labelled demonstration feed
+(`demo/misp_demo_feed.json`, → `/app/demo/misp_demo_feed.json`) whose indicators
+match the bundled attack scenario, so the enrichment is visible without a real MISP:
+
+```bash
+gcloud run services update vigia-live --region us-central1 --project vigia-497422 \
+  --update-env-vars MISP_FEED_PATH=/app/demo/misp_demo_feed.json
+```
+
+Confirm `/health` reports `"misp_feed": "misp:3"`, then
+`POST /fleet-investigate {"scenario":"attack"}` and read the `threat-intel` step in
+`fleet_log`: `misp_matches` is 3 on the attack window, 0 on the persistence window,
+and `worst_verdict` stays `MALICE_HIGH` — the match informs a human, it does not
+decide. In production, swap the path for your real org export.
+
 ```bash
 gcloud pubsub topics create annaconda-sweeps --project <project>
 gcloud pubsub subscriptions create annaconda-sweep-push \
