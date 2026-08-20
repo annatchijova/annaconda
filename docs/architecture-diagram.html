@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>annaconda / vigia-live — system architecture</title>
+<style>html,body{height:100%;margin:0;padding:0;background:#0a0e13}</style>
+</head>
+<body>
+<style>
+  :root {
+    --ground: #0a0e13;
+    --panel: #121a22;
+    --panel-2: #0f161d;
+    --line: #24313d;
+    --line-soft: #1a242e;
+    --ink: #e7eef5;
+    --muted: #8ea0b0;
+    --faint: #5f7183;
+    --seal: #4dd6c1;        /* deterministic / sealed — cold, cryptographic */
+    --seal-dim: #1d3b39;
+    --llm: #f0a668;         /* the model layer — warm, deliberately outside */
+    --llm-dim: #3a2a1a;
+    --verified: #57d977;
+    --malice: #f0555f;
+    --gcp: #7aa2f7;         /* google cloud services rail */
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  .wrap {
+    background:
+      radial-gradient(1100px 600px at 78% -8%, #12202a 0%, transparent 60%),
+      radial-gradient(900px 520px at 10% 108%, #14100c 0%, transparent 55%),
+      var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    padding: clamp(20px, 4vw, 56px);
+    min-height: 100%;
+  }
+  .page { max-width: 1080px; margin: 0 auto; }
+
+  /* ---- header ---- */
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--seal); margin: 0 0 14px;
+  }
+  h1 {
+    font-size: clamp(28px, 5vw, 46px); line-height: 1.04; margin: 0 0 16px;
+    font-weight: 680; letter-spacing: -0.02em; text-wrap: balance;
+  }
+  h1 .thin { color: var(--muted); font-weight: 400; }
+  .lede {
+    font-size: clamp(15px, 1.9vw, 18px); color: var(--muted);
+    max-width: 60ch; margin: 0 0 8px;
+  }
+  .lede b { color: var(--ink); font-weight: 600; }
+  .stamp {
+    display: inline-flex; gap: 8px; align-items: center; margin-top: 18px;
+    font-family: var(--mono); font-size: 12px; color: var(--faint);
+    border: 1px solid var(--line-soft); border-radius: 999px; padding: 6px 13px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--verified);
+    box-shadow: 0 0 0 3px rgba(87,217,119,.16); }
+
+  /* ---- legend ---- */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 26px 0 34px;
+    padding: 14px 18px; border: 1px solid var(--line-soft); border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255,255,255,.015), transparent);
+  }
+  .key { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--muted); }
+  .key i { width: 13px; height: 13px; border-radius: 4px; display: inline-block; flex: none; }
+  .k-seal { background: var(--seal-dim); border: 1px solid var(--seal); }
+  .k-llm  { background: var(--llm-dim); border: 1px solid var(--llm); }
+  .k-gcp  { background: rgba(122,162,247,.12); border: 1px solid var(--gcp); }
+  .k-out  { background: #10171e; border: 1px solid var(--line); }
+
+  /* ---- flow ---- */
+  .flow { display: grid; grid-template-columns: 1fr; gap: 0; }
+
+  .stage-label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--faint); margin: 0 0 12px; display: flex;
+    align-items: center; gap: 10px;
+  }
+  .stage-label::after { content: ""; height: 1px; flex: 1; background: var(--line-soft); }
+
+  .zone { border-radius: 16px; padding: 20px; position: relative; }
+  .zone.llm {
+    border: 1px solid rgba(240,166,104,.42);
+    background: linear-gradient(180deg, rgba(240,166,104,.07), rgba(240,166,104,.02));
+  }
+  .zone.core {
+    border: 1px solid rgba(77,214,193,.45);
+    background: linear-gradient(180deg, rgba(77,214,193,.075), rgba(77,214,193,.02));
+  }
+  .zone-tag {
+    position: absolute; top: -11px; left: 18px; font-family: var(--mono);
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 6px;
+  }
+  .zone.llm .zone-tag { background: #241a10; color: var(--llm); border: 1px solid rgba(240,166,104,.5); }
+  .zone.core .zone-tag { background: #0e1f1d; color: var(--seal); border: 1px solid rgba(77,214,193,.5); }
+
+  .row { display: grid; gap: 12px; }
+  .row.four { grid-template-columns: repeat(4, 1fr); }
+  .row.three { grid-template-columns: repeat(3, 1fr); }
+  .row.two { grid-template-columns: repeat(2, 1fr); }
+
+  .node {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
+    padding: 13px 14px;
+  }
+  .node h4 {
+    margin: 0 0 5px; font-size: 13.5px; font-weight: 620; letter-spacing: -.01em;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .node p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
+  .node .mono { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .node.spec h4::before {
+    content: ""; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--llm); flex: none;
+  }
+  .node.core-node { border-color: rgba(77,214,193,.28); }
+  .node.core-node h4 { color: #cffaf1; }
+  .node.reach h4::after {
+    content: "reaches core"; font-family: var(--mono); font-size: 9px;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--seal);
+    border: 1px solid var(--seal-dim); border-radius: 5px; padding: 2px 6px; margin-left: auto;
+  }
+
+  /* the seal boundary — the thesis */
+  .seal {
+    margin: 8px 0; padding: 15px 20px; border-radius: 14px;
+    border: 1px dashed rgba(77,214,193,.6);
+    background: repeating-linear-gradient(-45deg, rgba(77,214,193,.05) 0 10px, transparent 10px 20px), #0b1613;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .seal .glyph {
+    font-family: var(--mono); font-weight: 700; font-size: 13px; color: #05100e;
+    background: var(--seal); border-radius: 8px; padding: 8px 12px; letter-spacing: .04em;
+    flex: none;
+  }
+  .seal .txt { font-size: 13px; color: #bdf1e7; }
+  .seal .txt b { color: #eafffb; }
+  .seal .txt code { font-family: var(--mono); font-size: 11.5px; color: var(--seal); }
+
+  .connector {
+    display: flex; justify-content: center; align-items: center;
+    height: 30px; color: var(--faint);
+  }
+  .connector span {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em;
+    text-transform: uppercase; padding: 0 12px; white-space: nowrap;
+  }
+  .connector::before, .connector::after {
+    content: ""; width: 1px; height: 100%;
+    background: linear-gradient(var(--line), transparent);
+  }
+  .connector.up::after { background: linear-gradient(transparent, var(--line)); }
+
+  .arrowline {
+    text-align: center; color: var(--seal); font-size: 15px; line-height: 1;
+    margin: 2px 0;
+  }
+
+  /* summary chip: what the model actually receives */
+  .readonly {
+    display: inline-flex; align-items: center; gap: 8px; margin-top: 12px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--llm);
+    background: #1b140c; border: 1px solid rgba(240,166,104,.35);
+    border-radius: 8px; padding: 7px 12px;
+  }
+
+  /* verdict states */
+  .states { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+  .pill {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em;
+    padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .pill.mal { color: var(--malice); border-color: rgba(240,85,95,.4); background: rgba(240,85,95,.07); }
+  .pill.ben { color: var(--verified); border-color: rgba(87,217,119,.35); background: rgba(87,217,119,.06); }
+  .pill.abs { color: var(--gcp); border-color: rgba(122,162,247,.35); background: rgba(122,162,247,.06); }
+
+  /* outputs */
+  .outputs { margin-top: 6px; }
+  .out-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .out {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 13px; position: relative;
+  }
+  .out h5 { margin: 0 0 4px; font-size: 12.5px; font-weight: 620; }
+  .out p { margin: 0; font-size: 11px; color: var(--faint); font-family: var(--mono); }
+  .out .live { position: absolute; top: 11px; right: 11px; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--verified); box-shadow: 0 0 0 3px rgba(87,217,119,.14); }
+  .out .off { position: absolute; top: 11px; right: 11px; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--faint); }
+
+  /* gcp rail */
+  .rail {
+    margin-top: 30px; border: 1px solid var(--line-soft); border-radius: 14px;
+    padding: 18px 20px; background: linear-gradient(180deg, rgba(122,162,247,.04), transparent);
+  }
+  .rail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 22px; margin-top: 12px; }
+  .svc { display: flex; gap: 10px; align-items: flex-start; }
+  .svc i {
+    width: 9px; height: 9px; border-radius: 3px; margin-top: 5px; flex: none;
+    background: var(--gcp); box-shadow: 0 0 0 3px rgba(122,162,247,.12);
+  }
+  .svc b { font-size: 13px; font-weight: 600; display: block; }
+  .svc span { font-size: 11.5px; color: var(--faint); font-family: var(--mono); }
+
+  /* invariant callout */
+  .invariant {
+    margin-top: 30px; border-radius: 16px; padding: 22px 24px;
+    border: 1px solid rgba(77,214,193,.35);
+    background:
+      radial-gradient(600px 200px at 100% 0%, rgba(77,214,193,.09), transparent 70%),
+      #0c1512;
+  }
+  .invariant .lbl {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--seal); margin: 0 0 10px;
+  }
+  .invariant p { margin: 0; font-size: clamp(15px,2.1vw,19px); line-height: 1.5; color: var(--ink); text-wrap: pretty; }
+  .invariant p b { color: var(--seal); font-weight: 640; }
+
+  footer {
+    margin-top: 34px; padding-top: 18px; border-top: 1px solid var(--line-soft);
+    display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center;
+    font-family: var(--mono); font-size: 11.5px; color: var(--faint);
+  }
+  footer a { color: var(--seal); text-decoration: none; }
+  footer a:hover, footer a:focus { text-decoration: underline; }
+  footer .sep { color: var(--line); }
+
+  .fade { opacity: 0; transform: translateY(10px); animation: rise .6s ease forwards; }
+  .fade:nth-child(2) { animation-delay: .05s; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  @media (max-width: 720px) {
+    .row.four, .row.three, .out-grid, .rail-grid { grid-template-columns: 1fr 1fr; }
+    .row.two { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 460px) {
+    .row.four, .row.three, .out-grid, .rail-grid { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fade { animation: none; opacity: 1; transform: none; }
+  }
+</style>
+
+<div class="wrap">
+  <div class="page">
+
+    <header class="fade">
+      <p class="eyebrow">annaconda · vigia-live — system architecture</p>
+      <h1>The autonomous DFIR analyst that keeps the model <span class="thin">out of the verdict.</span></h1>
+      <p class="lede">A fleet of <b>Gemini&nbsp;+&nbsp;ADK</b> agents works forensic cases unattended on Google Cloud. But a
+        <b>deterministic core seals the verdict before any agent speaks</b> — the model puts the sealed result into words, it cannot change it.</p>
+      <span class="stamp"><span class="dot"></span> live on Cloud Run · us-central1 · Vertex&nbsp;AI · Firestore</span>
+    </header>
+
+    <div class="legend fade" role="list" aria-label="Legend">
+      <span class="key" role="listitem"><i class="k-seal"></i> deterministic &amp; sealed (no LLM, no float)</span>
+      <span class="key" role="listitem"><i class="k-llm"></i> LLM layer (Gemini via ADK)</span>
+      <span class="key" role="listitem"><i class="k-gcp"></i> Google Cloud service</span>
+      <span class="key" role="listitem"><i class="k-out"></i> pure output of the seal</span>
+    </div>
+
+    <div class="flow">
+
+      <!-- LLM PLANE -->
+      <p class="stage-label">Agent layer — orchestration, memory, words</p>
+      <div class="zone llm fade">
+        <span class="zone-tag">the model lives here — never the verdict</span>
+        <div class="row four">
+          <div class="node spec"><h4>Fleet-commander</h4><p>Works a case autonomously across cycles; keeps a hash-chained mission journal; self-schedules the next look, escalates, or stands down.</p></div>
+          <div class="node spec"><h4>Dispatcher</h4><p>Triages the case and routes collection to the specialists.</p></div>
+          <div class="node spec"><h4>Windows / Persistence hunters</h4><p>Collect running-state and persistence telemetry — each its own sealed window.</p></div>
+          <div class="node spec"><h4>Threat-intel · Detection-engineer</h4><p>VirusTotal / MISP enrichment; Sigma rule drafts. Read-only context.</p></div>
+        </div>
+        <div class="readonly">correlator ── the one role that may reach the core ──▶ adjudicate()</div>
+        <span style="float:right; margin-top:-26px; font-family:var(--mono); font-size:11px; color:var(--faint);">disjoint tool contracts · sealed registry (agent = hash of its tools) · catalog gate</span>
+      </div>
+
+      <div class="connector"><span>the model receives a compressed, read-only summary — it cannot supply a score, a state, or a hash</span></div>
+
+      <!-- THE SEAL -->
+      <div class="seal fade" role="note">
+        <span class="glyph">SHA-256 · SEAL</span>
+        <span class="txt"><b>The boundary.</b> The deterministic engine scores and seals the result <b>before</b> any agent is called. Swap the narrator backend and only the wording changes — the seal is <code>bit-for-bit</code> identical.</span>
+      </div>
+
+      <div class="arrowline" aria-hidden="true">▲ words&nbsp;&nbsp;·&nbsp;&nbsp;▼ sealed evidence</div>
+
+      <!-- DETERMINISTIC CORE -->
+      <p class="stage-label">Deterministic core — stdlib-only, exact arithmetic</p>
+      <div class="zone core fade">
+        <span class="zone-tag">no LLM · no float · reproducible</span>
+        <div class="row three">
+          <div class="node core-node">
+            <h4>Evidence windows</h4>
+            <p>Velociraptor VQL (or bundled demo telemetry) → normalized artifacts, frozen into an immutable window and hashed.</p>
+            <p class="mono" style="margin-top:6px;">window_hash = sha256(canonical)</p>
+          </div>
+          <div class="node core-node">
+            <h4>CAIE adjudication</h4>
+            <p>Scores the window with exact fractions (never floats); maps MITRE ATT&amp;CK; produces score + confidence.</p>
+            <div class="states">
+              <span class="pill mal">MALICE</span>
+              <span class="pill ben">BENIGN</span>
+              <span class="pill abs">ABSTAIN</span>
+              <span class="pill">ESCALATE</span>
+            </div>
+          </div>
+          <div class="node core-node">
+            <h4>Sealed verdict chain</h4>
+            <p>Each verdict seals onto the previous one; reads re-verify end-to-end. Enrichment is sealed <em>beside</em> the evidence, never among it.</p>
+            <p class="mono" style="margin-top:6px;">entry_hash ← prev_entry_hash</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="connector up"><span>every sealed verdict is a pure, deterministic projection ▼</span></div>
+
+      <!-- OUTPUTS -->
+      <p class="stage-label">DFIR interoperability — output of the seal, never an input</p>
+      <div class="outputs fade">
+        <div class="out-grid">
+          <div class="out"><span class="live"></span><h5>STIX 2.1</h5><p>/cases/{id}/stix</p></div>
+          <div class="out"><span class="live"></span><h5>CACAO 2.0</h5><p>/cases/{id}/cacao</p></div>
+          <div class="out"><span class="live"></span><h5>Independent verifier</h5><p>annaconda-verify</p></div>
+          <div class="out"><span class="live"></span><h5>Sigma synthesis</h5><p>detection-engineer</p></div>
+          <div class="out"><span class="live"></span><h5>SecOps push</h5><p>Pub/Sub → Chronicle</p></div>
+          <div class="out"><span class="live"></span><h5>MISP / OpenCTI</h5><p>feed match, sealed</p></div>
+          <div class="out"><span class="off"></span><h5>VirusTotal / GTI</h5><p>needs VT_API_KEY</p></div>
+          <div class="out"><span class="live"></span><h5>Court exhibit</h5><p>/cases/{id}/exhibit</p></div>
+        </div>
+      </div>
+
+      <!-- AUTONOMOUS LOOP + GCP -->
+      <div class="rail fade">
+        <p class="stage-label" style="margin-bottom:2px;">Runs unattended · Google Cloud</p>
+        <div class="rail-grid">
+          <div class="svc"><i></i><div><b>Cloud Scheduler → Pub/Sub</b><span>cron wakes the fleet: POST /tasks/sweep</span></div></div>
+          <div class="svc"><i></i><div><b>Cloud Run</b><span>FastAPI backend — vigia-live</span></div></div>
+          <div class="svc"><i></i><div><b>Vertex AI</b><span>Gemini 3.5 Flash (global endpoint)</span></div></div>
+          <div class="svc"><i></i><div><b>Firestore</b><span>case store + verdict &amp; mission chains</span></div></div>
+          <div class="svc"><i></i><div><b>Pub/Sub</b><span>sealed-verdict push to SecOps</span></div></div>
+          <div class="svc"><i></i><div><b>Cloud Trace</b><span>OpenTelemetry reasoning spans</span></div></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="invariant fade">
+      <p class="lbl">the one invariant</p>
+      <p>A language model can read the evidence correctly and still reach the wrong conclusion under narrative pressure — and you cannot put "the model felt sure" in front of a court. So the model <b>never touches the decision path</b>. Autonomy where it helps; determinism where it must hold.</p>
+    </div>
+
+    <footer>
+      <span>annaconda / vigia-live</span><span class="sep">·</span>
+      <a href="https://github.com/annatchijova/annaconda">github.com/annatchijova/annaconda</a><span class="sep">·</span>
+      <span>Apache-2.0</span><span class="sep">·</span>
+      <a href="https://vigia-live-1028999311218.us-central1.run.app/architecture">live /architecture</a>
+    </footer>
+
+  </div>
+</div>
+</body>
+</html>
