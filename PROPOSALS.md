@@ -39,6 +39,17 @@ class only.
 - **Community value:** reputation context sealed alongside the evidence, with a
   provable "the reputation did not decide" property.
 
+### Independent, stdlib-only bundle verifier — `annaconda-verify`
+`tools/verify_bundle.py` re-derives every seal in an exported exhibit
+(`GET /cases/{id}/exhibit`) and reports PASS / WARN / FAIL, catching any altered,
+reordered, inserted, or dropped verdict — and, when the windows are included, any
+tampered evidence. It is standard-library only and **imports nothing from
+annaconda**: it keeps its own copy of the canonical encoder, held bit-for-bit in
+lockstep with the producer by a test, so it cannot share a bug with the sealer.
+A third party can run it on an air-gapped machine without trusting this service.
+- **Google / community value:** the Daubert posture made runnable — the guarantee
+  is worth more precisely because someone who distrusts you can check it themselves.
+
 ---
 
 ## Proposed
@@ -69,19 +80,6 @@ template over the sealed fields — no model authoring detection logic. The Sigm
 rule is an artifact of the verdict, not an input to it. Ship it behind a `WARN`
 posture: a machine-suggested rule is a draft for a human to approve, and it says so.
 **Effort.** Medium. Needs a curated field→Sigma mapping, kept deterministic.
-
-### E — Independent, stdlib-only bundle verifier as a published CLI
-**What.** Package the existing seal/chain verification as a standalone
-`annaconda-verify` CLI (and a `/exhibit/{id}/verify` endpoint) that a third party —
-opposing counsel, an auditor, another SOC — can run **without trusting or even
-running annaconda** to confirm a sealed bundle is intact and reproduces.
-**Why.** This is the Daubert posture made concrete: the guarantee is worth more
-when someone who distrusts you can check it themselves. It is also the most
-credible thing to hand a court or a compliance reviewer.
-**Invariant.** It *is* the invariant, packaged for adversarial use. Stdlib-only,
-independent of the producing code, so it cannot share a bug with the sealer.
-**Effort.** Small. The verification logic exists; this is packaging + a fixture
-corpus of known-good and tampered bundles.
 
 ### F — Sealed-verdict push to Google SecOps (Chronicle) over Pub/Sub
 **What.** On each sealed escalation, publish the STIX bundle to a Pub/Sub topic a

@@ -455,6 +455,39 @@ def get_case_stix(case_id: str) -> dict:
     return case_to_stix(case, chain_ok=chain["chain_ok"])
 
 
+@app.get("/cases/{case_id}/exhibit")
+def get_case_exhibit(case_id: str) -> dict:
+    """A self-contained exhibit bundle for independent, offline verification.
+
+    Carries the sealed verdict chain and the case metadata needed to re-derive
+    every seal without this service. Save it and run the standalone
+    ``annaconda-verify`` (tools/verify_bundle.py) — a stdlib-only tool that
+    imports nothing from annaconda — to confirm the chain is intact. The
+    ``chain_ok`` field here is this service's own opinion; the point of the
+    exhibit is that a third party need not trust it."""
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    chain = verify_stream(case.get("entries", []))
+    return {
+        "format": "annaconda-exhibit",
+        "format_version": 1,
+        "case_id": case_id,
+        "case": {
+            "case_id": case.get("case_id"),
+            "host": case.get("host"),
+            "created_utc": case.get("created_utc"),
+            "updated_utc": case.get("updated_utc"),
+            "examiner_id": case.get("examiner_id"),
+            "worst_verdict": case.get("worst_verdict"),
+            "entries": case.get("entries", []),
+        },
+        "chain_ok": chain["chain_ok"],
+        "verify_with": ("python3 -m tools.verify_bundle exhibit.json  "
+                        "(stdlib-only, independent of this service)"),
+    }
+
+
 @app.post("/cases/{case_id}/investigate")
 async def investigate_case(case_id: str, req: CaseInvestigateRequest) -> dict:
     case = _CASE_STORE.get_case(case_id)
