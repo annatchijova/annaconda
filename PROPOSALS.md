@@ -76,21 +76,22 @@ byte-identical, and a step records a sealed decision, it never re-decides.
   Google SecOps consume; it makes the fleet's autonomy auditable and repeatable by
   other tools, not just observable in its own console.
 
+### Sealed-verdict push to Google SecOps (Chronicle) over Pub/Sub
+`service/secops_push.py` publishes a sealed verdict's STIX bundle to a Pub/Sub
+topic a Chronicle feed subscribes to, so annaconda's verdicts land in the SIEM
+timeline with no human copy-paste. On-demand via `POST /cases/{id}/push-to-secops`,
+and automatically on every sealed escalation during the autonomous sweep. The push
+is strictly downstream of the seal: the payload is the deterministic STIX bundle,
+the sink cannot change the verdict, and a delivery failure is recorded, never
+raised into the cycle and never discards the sealed verdict. Honest degradation —
+no topic configured means `secops_push: "unavailable"` on `/health`, not a
+fabricated delivery.
+- **Google / community value:** completes the Google-native loop — unattended
+  detection → sealed verdict → SecOps — reusing the autonomous sweep's Pub/Sub wiring.
+
 ---
 
 ## Proposed
-
-### F — Sealed-verdict push to Google SecOps (Chronicle) over Pub/Sub
-**What.** On each sealed escalation, publish the STIX bundle to a Pub/Sub topic a
-Chronicle feed subscribes to, so annaconda's verdicts land in the enterprise SIEM
-timeline automatically.
-**Why.** Completes the Google-native loop: unattended detection → sealed verdict →
-SecOps, with no human copy-paste. Reuses the autonomous sweep's existing Pub/Sub
-wiring.
-**Invariant.** Push is downstream of the seal; a delivery failure is a `WARN` that
-never discards the sealed verdict (honest degradation — the persistence-failure
-rule already in the codebase).
-**Effort.** Small–medium. Mostly IAM + a topic + reusing the STIX export.
 
 ### G — MISP / OpenCTI ingestion to seed enrichment context
 **What.** Pull an organization's own MISP / OpenCTI indicators to seed the

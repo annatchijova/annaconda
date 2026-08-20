@@ -98,6 +98,11 @@ def _rate_ok(key: str) -> bool:
 # Durable case store (Firestore when reachable, else memory — see case_store).
 _CASE_STORE = build_case_store()
 
+# Sealed-verdict push to Google SecOps (Chronicle) over Pub/Sub. Downstream of
+# the seal; 'unavailable' when no topic is configured (honest, reported on /health).
+from service.secops_push import build_pusher  # noqa: E402
+_SECOPS = build_pusher()
+
 # Reasoning-chain tracing to Cloud Trace (no-op if unavailable — honest).
 from service.tracing import flush_tracing, setup_tracing, tracing_mode  # noqa: E402
 _TRACING = setup_tracing()
@@ -215,6 +220,9 @@ def health() -> dict:
         # backend when a key is configured, else "unavailable". It is sealed
         # evidence beside the verdict, never a decider — see agent/threat_intel.py.
         "threat_intel": _threat_intel_posture(),
+        # Where sealed verdicts are pushed for SIEM ingestion, or 'unavailable'.
+        # Downstream of the seal; a delivery failure never discards a verdict.
+        "secops_push": _SECOPS.posture(),
         "autonomous_sweeps": _SWEEP_STATE["count"],
         "last_sweep_utc": _SWEEP_STATE["last_utc"],
         # The fleet's unattended work: cycles are agent-driven, sweeps are only
@@ -472,6 +480,25 @@ def get_case_cacao(case_id: str) -> dict:
     mem = verify_mission(mission) if mission else {"memory_ok": None}
     return case_to_cacao(case, mission_ok=mem.get("memory_ok"),
                          chain_ok=chain["chain_ok"])
+
+
+@app.post("/cases/{case_id}/push-to-secops")
+def push_case_to_secops(case_id: str) -> dict:
+    """Push the case's sealed verdict (as a STIX 2.1 bundle) to Google SecOps
+    (Chronicle) over Pub/Sub. Downstream of the seal: the response reports the
+    delivery status (published / unavailable / failed) and always 200 — the
+    sealed verdict stands regardless of whether the sink accepted it."""
+    from verdict.stix_export import case_to_stix
+    from service.secops_push import stix_attributes
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    chain = verify_stream(case.get("entries", []))
+    bundle = case_to_stix(case, chain_ok=chain["chain_ok"])
+    result = _SECOPS.push(bundle, attributes=stix_attributes(
+        bundle, case_id=case_id, worst_verdict=case.get("worst_verdict"),
+        chain_ok=chain["chain_ok"]))
+    return {"case_id": case_id, "push": result}
 
 
 @app.get("/cases/{case_id}/exhibit")
@@ -843,8 +870,24 @@ async def sweep(req: Request) -> dict:
             continue
 
         _SWEEP_STATE["cycles_total"] += 1
+        secops = None
         if result.get("escalation"):
             _SWEEP_STATE["escalations_total"] += 1
+            # A sealed escalation is pushed to SecOps automatically. This is
+            # downstream of the seal and fully guarded: any failure is recorded,
+            # never allowed to break the sweep or discard the sealed verdict.
+            try:
+                from verdict.stix_export import case_to_stix
+                from service.secops_push import stix_attributes
+                fresh = _CASE_STORE.get_case(cid) or case
+                chain = verify_stream(fresh.get("entries", []))
+                bundle = case_to_stix(fresh, chain_ok=chain["chain_ok"])
+                secops = _SECOPS.push(bundle, attributes=stix_attributes(
+                    bundle, case_id=cid, worst_verdict=fresh.get("worst_verdict"),
+                    chain_ok=chain["chain_ok"]))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("secops push failed on case %s: %s", cid, exc)
+                secops = {"status": "failed", "reason": str(exc)}
         worked.append({
             "case_id": cid,
             "cycle": result["cycle"],
@@ -854,6 +897,7 @@ async def sweep(req: Request) -> dict:
             "next_due_utc": (result.get("next_action") or {}).get("due_utc"),
             "standing_down": result.get("standing_down") is not None,
             "memory_ok": result["memory"]["memory_ok"],
+            "secops_push": (secops or {}).get("status") if secops else None,
         })
 
     _SWEEP_STATE["count"] += 1
