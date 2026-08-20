@@ -1,0 +1,16 @@
+{
+  "_comment": "DEMONSTRATION MISP/OpenCTI feed for the annaconda showcase — NOT real threat intel. These indicators deliberately match the bundled attack scenario so the sealed-beside-the-evidence MISP enrichment is visible on /fleet-investigate. Point MISP_FEED_PATH at a real org export in production.",
+  "indicators": [
+    {"type": "ip-dst", "value": "203.0.113.66", "threat_level_id": 1,
+     "tags": ["tlp:amber", "c2", "apt-demo"],
+     "event_info": "Simulated C2 endpoint (annaconda demo feed)", "event_id": "9001"},
+    {"type": "sha256",
+     "value": "01d5657725380979afc09f98c66757efcec601e791a4459b3b124b9d848f7f2b",
+     "threat_level_id": 1, "tags": [{"name": "dropper"}],
+     "event_info": "Known first-stage dropper (annaconda demo feed)", "event_id": "9002"},
+    {"type": "sha256",
+     "value": "191dcd18338a4b886f171fb9077c98f384b1c1bf66060705bef4a521ea364abf",
+     "threat_level_id": 2, "tags": ["persistence"],
+     "event_info": "Persistence payload (annaconda demo feed)", "event_id": "9003"}
+  ]
+}

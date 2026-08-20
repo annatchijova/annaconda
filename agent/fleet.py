@@ -176,6 +176,7 @@ def dispatch_investigation(session: PurpleTeamSession) -> dict:
                         "window_id": summary["window_id"],
                         "indicators": enrichment.get("indicators"),
                         "flagged": enrichment.get("flagged"),
+                        "misp_matches": (enrichment.get("misp") or {}).get("matches", 0),
                         "sealed_into_window": enrichment.get("sealed_into_window")})
             with _span("correlator.adjudicate",
                        **{"fleet.role": "correlator",
