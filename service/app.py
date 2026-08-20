@@ -431,6 +431,20 @@ def get_case(case_id: str) -> dict:
             "chain_errors": chain["errors"], "persistence": _CASE_STORE.backend}
 
 
+@app.get("/cases/{case_id}/stix")
+def get_case_stix(case_id: str) -> dict:
+    """The sealed case as a STIX 2.1 bundle — for a SIEM, a TIP (MISP), or a
+    court exhibit. Pure output of the seal: the entry_hash chain is referenced,
+    not recomputed, so a consumer can re-verify it. Deterministic (uuid5 ids,
+    timestamps from the record), so re-exporting the same case is byte-identical."""
+    from verdict.stix_export import case_to_stix
+    case = _CASE_STORE.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    chain = verify_stream(case.get("entries", []))
+    return case_to_stix(case, chain_ok=chain["chain_ok"])
+
+
 @app.post("/cases/{case_id}/investigate")
 async def investigate_case(case_id: str, req: CaseInvestigateRequest) -> dict:
     case = _CASE_STORE.get_case(case_id)
