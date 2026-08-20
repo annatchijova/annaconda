@@ -577,3 +577,121 @@ deletes and rebuilds the showcase cases, is rate limited.
   the rate limit slows arrival, but a patient stranger can still fill the
   database. A case quota, or authentication on creation, is the real answer.
 - The rate limiter remains one per-process bucket per key, not per principal.
+
+---
+
+# Red Team Round 7 — a code review of the whole branch, before it ships
+
+**Method:** full-diff review of `main...HEAD` (33 files, ~7k lines) at high
+effort, then A–D–I on each finding before touching anything.
+**Base:** `claude/agentic-autonomous-project-d9y5u0` @ `84c499a`.
+**Why:** none of this session's work had ever been merged or deployed. Reviewing
+7k lines of unshipped changes *before* they reach production is cheaper than
+after.
+
+Four of the seven findings were reproduced. Two of them are corrections to
+claims made in earlier rounds of this very document — recorded here rather than
+edited away, because a claim that was too broad is a finding.
+
+## Executive summary
+| ID | Severity | Level | Bucket | Finding |
+|----|----------|-------|--------|---------|
+| RT-17 | **High** | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | Round 4's concurrency defence did not cover the sealed *verdict* chain: two concurrent cycles stored entries with duplicate sequence numbers, and the chain's own verifier rejected the result. |
+| RT-18 | **High** | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | After a human acknowledged the first escalation, a later cycle sealing a fresh `MALICE_HIGH` reached nobody — RT-08's failure, reappearing through a derived field. |
+| RT-19 | Medium | CONFIRMED BY INDUCTION | **vulnerability (fixed)** | Ids minted as `len(list)+1` collide once `_trim` caps the list; settling a line of inquiry then settled an older namesake. |
+| RT-20 | Medium | PLAUSIBLE → fixed | vulnerability (fixed) | A cycle that left an already past-due plan untouched kept the case permanently due, so every wake-up ran a full Gemini cycle on it. |
+| RT-21 | Low–Med | CODE FACT | vulnerability (fixed) | Escalations were acknowledged by position into a list `_trim` mutates, so a stale index could silence an escalation nobody handled. |
+| RT-22 | Low | CODE FACT | hygiene (fixed) | `_run_cycle_on_case` built a session — and a `mkdtemp` never removed — before the due check, leaking a directory per case per sweep. |
+| RT-23 | Low | CODE FACT | hygiene (fixed) | A rate-limit guard was inserted above `demo_seed`'s docstring, leaving the endpoint with no `__doc__`. |
+
+---
+
+## RT-17 — Round 4's concurrency claim was too broad
+
+**Severity:** High **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+Round 4 (RT-07) said two concurrent cycles are "detected and refused — the
+record stays intact". That is true of the **mission journal** and was false of
+the **sealed verdict stream**. The correction matters more than the fix.
+
+- **Why the check missed it:** the divergence guard compares the writer's
+  *prefix* against the stored head. But the verdict stream is minted by a
+  `PurpleTeamSession` built from the case *as it was read*, so two concurrent
+  cycles produce entries carrying the same `sequence` and the same
+  `prev_entry_hash`. The second writer then re-reads the case before
+  persisting — so its prefix is the first writer's entries and matches
+  perfectly. The divergence is not in the prefix; it is in the entries being
+  appended.
+- **Induction:** two sessions built from the same snapshot, both adjudicating
+  the attack fixture. Observed: second write **accepted**, stored sequences
+  `[0, 0]`, both `prev_entry_hash` = genesis, and
+  `verify_stream(...)["chain_ok"] == False` —
+  `sequence 0 != 1` and `prev_entry_hash does not match previous entry`. The
+  sealed chain was corrupted and nothing complained at write time.
+- **Fix:** the check now also requires the **first new entry to chain onto the
+  stored head** (`prev_of(chain[already]) == index["head"]`), reading
+  `prev_entry_hash` or `prev_hash` so both chains are covered by one rule.
+  `tests/test_chain_segmentation.py::test_entries_minted_against_a_stale_head_are_refused`
+  drives it with genuinely sealed entries — the earlier synthetic fixtures
+  could not have caught this, because `_entry(0)`'s hash is 64 zeros, which
+  *is* the genesis hash.
+
+## RT-18 — RT-08's failure, back through a derived field
+
+**Severity:** High **Level:** CONFIRMED BY INDUCTION **Bucket:** vulnerability (fixed)
+
+Round 4 made "a sealed MALICE must reach a human" structural. Round 5 then made
+`mission["escalation"]` a *derived view* that falls back to the most recent
+entry once everything is acknowledged — and the net still gated on
+`mission["escalation"] is None`, which is never true again after the first
+escalation.
+
+- **Induction:** cycle 1 seals `MALICE_HIGH` and escalates; a human
+  acknowledges it; cycle 2 seals `MALICE_HIGH` again with a commander that says
+  nothing. Observed: escalations still 1, **unacknowledged 0**. A freshly
+  sealed malicious verdict reached nobody.
+- **Causal chain:** derived field never returns to None → net never fires →
+  the only remaining path is the agent choosing to escalate, which is exactly
+  the assumption RT-08 removed.
+- **Fix:** `mission.has_open_escalation()` asks the real question — is any
+  escalation still *unacknowledged* — and the net gates on that. The lesson is
+  narrower than "check the right field": a derived convenience view was
+  substituted for a predicate, and the substitution was invisible at the call
+  site.
+
+## RT-19 / RT-21 — capping a list broke the ids into it
+
+**Severity:** Medium / Low–Medium **Level:** CONFIRMED BY INDUCTION / CODE FACT
+
+RT-12's fix capped the working lists. Ids were minted as `len(list) + 1` and
+escalations were acknowledged by position — both of which assume a list that
+only grows.
+
+- Reproduced duplicate `H101` / `Q51` once the cap was reached;
+  `update_hypothesis` then settles whichever namesake it finds first.
+- **Fix:** a monotonic per-mission counter (seeded from the highest id already
+  present, so older missions keep handing out fresh ids), and escalations carry
+  a stable `id` that `acknowledge_escalation` accepts in place of a position.
+  `_trim` now runs *before* the derived view is recomputed, so the view can
+  never point at an entry the cap just dropped.
+
+## RT-20 / RT-22 / RT-23 — the smaller ones
+
+- **RT-20:** the "never leave the case without a decision" net asked *is the
+  plan absent?* when the question is *is this case still due?*. A cycle that
+  left an already past-due plan in place kept `is_due` True, so every wake-up
+  ran a full Gemini cycle on that case forever. Now gated on `mem.is_due`.
+- **RT-22:** `_run_cycle_on_case` built a session — and a `mkdtemp` that is
+  never cleaned — before checking whether the case was due. Since most
+  wake-ups on most cases correctly skip, that leaked a directory per case per
+  sweep. The due check moved ahead of the session build.
+- **RT-23:** a rate-limit guard was inserted above `demo_seed`'s docstring,
+  leaving the endpoint with no `__doc__` and no OpenAPI description.
+
+## What this round says about the method
+
+Two of seven findings are earlier rounds' claims being too broad, both in the
+same shape: a guarantee was established, then a *later* refactor moved the thing
+it depended on, and nothing re-checked the guarantee. The tests that would have
+caught RT-17 existed — they just used synthetic entries whose hashes could not
+express the failure. Fixtures that cannot represent the bug are not coverage.

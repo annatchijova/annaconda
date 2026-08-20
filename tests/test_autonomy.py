@@ -243,3 +243,28 @@ def test_a_case_with_malice_in_its_history_never_stands_down():
     for _ in range(5):
         _cycle(session, case, force=True)
     assert case["mission"]["standing_down"] is None
+
+
+def test_a_cycle_never_leaves_a_case_still_due():
+    """The safety net asked "is the plan absent?" when it should have asked "is
+    this case still due?". A cycle that left the previous, already past-due plan
+    untouched slipped through — and since is_due stays True, every wake-up ran a
+    full Gemini cycle on that case, for as long as it existed."""
+    case = _case("AUTO-STALE")
+    session = _session(BENIGN, "AUTO-STALE")
+    _cycle(session, case)
+
+    # Age the plan into the past, as a cron would find it, then run a cycle
+    # whose planner leaves it alone.
+    case["mission"]["next_action"]["due_utc"] = "2020-01-01T00:00:00Z"
+    assert mem.is_due(case["mission"]), "precondition: the case is due"
+
+    original = autonomy.plan_deterministically
+    autonomy.plan_deterministically = lambda *a, **k: None
+    try:
+        _cycle(session, case, force=True)
+    finally:
+        autonomy.plan_deterministically = original
+
+    assert not mem.is_due(case["mission"]), (
+        "the cycle left the case due, so every sweep would work it again")

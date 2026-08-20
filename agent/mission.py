@@ -120,6 +120,32 @@ def _trim(mission: dict) -> None:
         dropped[key] += before - len(mission[key])
 
 
+def _mint_id(mission: dict, counter: str, prefix: str) -> str:
+    """A monotonically increasing id for one of the working lists.
+
+    Deliberately not ``len(list) + 1``: the lists are capped by ``_trim``, so
+    once a cap is reached the length stops growing and every later entry is
+    minted with the same id — after which ``update_hypothesis`` settles
+    whichever collision it finds first. The counter only ever goes up.
+
+    Seeded from the highest id already present, so a mission written before the
+    counter existed keeps handing out fresh ids rather than replaying old ones.
+    """
+    seen = mission.get(counter)
+    if not isinstance(seen, int):
+        field = {"_next_hypothesis": "hypotheses",
+                 "_next_question": "open_questions",
+                 "_next_escalation": "escalations"}[counter]
+        seen = 0
+        for item in mission.get(field) or []:
+            raw = str(item.get("id", ""))[len(prefix):]
+            if raw.isdigit():
+                seen = max(seen, int(raw))
+    seen += 1
+    mission[counter] = seen
+    return f"{prefix}{seen}"
+
+
 def _text(value, field: str, *, limit: int = 2000) -> str:
     """Accept a non-empty string, bounded. Memory an agent writes on a cron for
     weeks is memory that grows without bound unless something says no."""
@@ -259,7 +285,7 @@ def verify_mission(mission: dict) -> dict:
 def add_hypothesis(mission: dict, *, actor: str, text: str) -> dict:
     """Open a line of inquiry. Returns the stored hypothesis (with its id)."""
     hypothesis = {
-        "id": f"H{len(mission['hypotheses']) + 1}",
+        "id": _mint_id(mission, "_next_hypothesis", "H"),
         "text": _text(text, "hypothesis text"),
         "status": "open",
         "rationale": None,
@@ -321,7 +347,7 @@ def note_open_question(mission: dict, *, actor: str, question: str,
         if q["question"] == question:
             return q
     entry = {
-        "id": f"Q{len(mission['open_questions']) + 1}",
+        "id": _mint_id(mission, "_next_question", "Q"),
         "question": question,
         "what_would_resolve": _text(what_would_resolve, "what_would_resolve"),
         "opened_cycle": mission.get("cycles", 0),
@@ -424,6 +450,19 @@ def _escalation_rank(entry: dict) -> int:
     return 1 if states else 0
 
 
+def has_open_escalation(mission: dict) -> bool:
+    """Whether an escalation is still demanding a human's attention.
+
+    Distinct from ``mission["escalation"]``, which is a *derived view* that
+    falls back to the most recent entry once every escalation has been
+    acknowledged — so it is never None again after the first one. Anything
+    asking "does this case still need a person?" must ask here, or it silently
+    answers "yes, already handled" forever.
+    """
+    return any(not e.get("acknowledged")
+               for e in (mission.get("escalations") or []))
+
+
 def _current_escalation(mission: dict) -> Optional[dict]:
     """What a human should be shown: the most severe escalation nobody has
     acknowledged yet, most recent breaking ties. Only when every escalation has
@@ -485,11 +524,17 @@ def escalate(mission: dict, *, actor: str, why: str, what_to_check: str,
     # bring it in so its history is not lost by this change.
     previous = mission.get("escalation")
     if isinstance(previous, dict) and previous not in entries:
+        previous.setdefault("id", _mint_id(mission, "_next_escalation", "E"))
         entries.append(previous)
+    # A stable id, because the list is capped by _trim: acknowledging by
+    # position would take up whichever escalation had slid into that slot.
+    entry["id"] = _mint_id(mission, "_next_escalation", "E")
     entries.append(entry)
-    mission["escalation"] = _current_escalation(mission)
     record(mission, actor=actor, action="escalate_to_human", detail=dict(entry))
+    # Trim first, then derive: the view must never point at an entry the cap
+    # just dropped.
     _trim(mission)
+    mission["escalation"] = _current_escalation(mission)
     return entry
 
 
@@ -508,18 +553,31 @@ def acknowledge_escalation(mission: dict, *, actor: str, index: int,
     carries everywhere else.
     """
     entries = mission.get("escalations") or []
-    if not 0 <= index < len(entries):
-        raise MissionError(f"no escalation at index {index}")
-    entries[index]["acknowledged"] = True
-    entries[index]["acknowledged_by"] = _text(actor, "actor", limit=120)
-    entries[index]["acknowledged_by_authenticated"] = bool(authenticated)
-    entries[index]["acknowledged_note"] = _text(note, "note")
-    entries[index]["acknowledged_utc"] = _now()
+    # ``index`` may be a stable escalation id ("E3") or a position. Prefer the
+    # id: the list is capped by _trim, so a position a caller read a moment ago
+    # can point at a different escalation by the time it is used — and taking up
+    # the wrong one silences an escalation nobody handled.
+    target = None
+    if isinstance(index, str) and not index.lstrip("-").isdigit():
+        target = next((e for e in entries if e.get("id") == index), None)
+    else:
+        position = int(index)
+        if 0 <= position < len(entries):
+            target = entries[position]
+    if target is None:
+        raise MissionError(f"no escalation {index!r}")
+
+    target["acknowledged"] = True
+    target["acknowledged_by"] = _text(actor, "actor", limit=120)
+    target["acknowledged_by_authenticated"] = bool(authenticated)
+    target["acknowledged_note"] = _text(note, "note")
+    target["acknowledged_utc"] = _now()
     mission["escalation"] = _current_escalation(mission)
     record(mission, actor=actor, action="acknowledge_escalation",
-           detail={"index": index, "note": entries[index]["acknowledged_note"],
+           detail={"escalation_id": target.get("id"),
+                   "note": target["acknowledged_note"],
                    "authenticated": bool(authenticated)})
-    return entries[index]
+    return target
 
 
 def stand_down(mission: dict, *, actor: str, rationale: str) -> dict:

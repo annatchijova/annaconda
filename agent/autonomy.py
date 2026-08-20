@@ -525,9 +525,14 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
         # agent might not, and a cycle that seals MALICE and tells nobody is
         # the failure this whole system exists to prevent. Raised here, from
         # the sealed record, with the basis attached mechanically.
+        # Asks whether an escalation is still OPEN, not whether the derived
+        # mission["escalation"] field is populated: that field falls back to the
+        # latest entry once everything is acknowledged, so gating on it meant
+        # that after the first escalation was taken up, a later cycle sealing a
+        # fresh MALICE raised nothing and reached nobody.
         malice = [v for v in sealed_verdicts(session)
                   if v.get("verdict_state", "").startswith("MALICE")]
-        if malice and mission.get("escalation") is None:
+        if malice and not mem.has_open_escalation(mission):
             mem.escalate(
                 mission, actor="engine",
                 why=f"the sealed engine adjudicated "
@@ -547,8 +552,13 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
         # A cycle that ended with no decision about the case's future would
         # strand it: the sweep would revisit it every tick forever. Close that
         # hole here rather than trusting the planner to have done it.
-        if (mission.get("next_action") is None
-                and not mission.get("standing_down")):
+        #
+        # The condition is "is this case still due?", not "is the plan absent?".
+        # A cycle that left the previous, already past-due plan untouched used
+        # to slip through — and since is_due stays True, every wake-up ran a
+        # full Gemini cycle on that case, for as long as it existed.
+        if (not mission.get("standing_down")
+                and (mission.get("next_action") is None or mem.is_due(mission))):
             default_hours = COMPROMISED_MAX_INTERVAL_H if compromised else 24
             mem.schedule_next_action(
                 mission, actor=COMMANDER_NAME,

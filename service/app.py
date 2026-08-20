@@ -687,6 +687,15 @@ async def _run_cycle_on_case(case: dict, *, department: str, trigger: str,
                              principal: Optional[dict] = None) -> dict:
     """One unattended cycle on one case, persisted."""
     cid = case["case_id"]
+    # The due check first: building a session mints a temp directory, and most
+    # wake-ups on most cases correctly skip. Building one for every skipped
+    # case leaked a directory per case per sweep — on a cron, forever.
+    mission = mem.attach(case)
+    if not force and not mem.is_due(mission):
+        return {"acted": False, "reason": "not due", "case_id": cid,
+                "next_action": mission.get("next_action"),
+                "standing_down": mission.get("standing_down") is not None}
+
     session = _session_for_case(case, case.get("scenario", "benign"))
     result = await autonomy.run_cycle(session, case, department=department,
                                       trigger=trigger, force=force,
@@ -908,15 +917,15 @@ def acknowledge_escalation(case_id: str, index: int, req: AcknowledgeRequest,
 
 @app.post("/demo/seed")
 def demo_seed() -> dict:
-    if not _rate_ok("demo_seed"):
-        raise HTTPException(status_code=429,
-                            detail="rate limited — seeding deletes and rebuilds "
-                                   "the showcase cases")
     """Reset the showcase to a clean, predictable state — so a judge arriving on
     any day of the review window sees the same three cases: a resolved-benign
     host, a compromised host, and a host stuck in ABSTAIN with an open question
     ready to be reopened. These demo cases are excluded from the autonomous
     sweep, so nothing mutates them behind the judge's back."""
+    if not _rate_ok("demo_seed"):
+        raise HTTPException(status_code=429,
+                            detail="rate limited — seeding deletes and rebuilds "
+                                   "the showcase cases")
     host = {"client_id": "C.demo", "hostname": "WIN11-VICTIM", "os": "windows"}
     plan = {
         "DEMO-BENIGN": ("benign", [["pslist", "netstat"]]),

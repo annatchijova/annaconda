@@ -441,3 +441,75 @@ def test_a_case_written_before_segmentation_keeps_its_history(store):
     assert migrated["chain_index"]["entries"]["count"] == 6
     assert store.fake.docs["cases/LEGACY"]["entries"] == []
     assert mem.verify_mission(migrated["mission"])["memory_ok"]
+
+
+def _sealing_session(case, case_id="STALE"):
+    """A real session that continues the case's chain, exactly as the service
+    builds one. Synthetic entries cannot exercise chain continuity — _entry(0)'s
+    hash is 64 zeros, which *is* the genesis hash."""
+    import tempfile
+    from pathlib import Path
+    from agent.tools import PurpleTeamSession
+    from tools.velociraptor.adapter import MockTransport
+    from core.verdict_stream import GENESIS_HASH
+
+    repo = Path(__file__).resolve().parent.parent
+    entries = case.get("entries", [])
+    return PurpleTeamSession(
+        MockTransport(repo / "tests" / "fixtures" / "attack"), case_id=case_id,
+        host={"client_id": "C.1", "hostname": "H", "os": "windows"},
+        examiner_id="op", out_dir=tempfile.mkdtemp(), source="replay",
+        time_base="2026-08-12T14:10:00Z",
+        start_sequence=len(entries),
+        start_prev_hash=entries[-1]["entry_hash"] if entries else GENESIS_HASH)
+
+
+def test_entries_minted_against_a_stale_head_are_refused(store):
+    """The prefix check alone does not protect the SEALED VERDICT chain.
+
+    The verdict stream is built by a *session* constructed from the case as it
+    was read, so two concurrent cycles mint entries with the same sequence and
+    the same prev hash. The second writer then re-reads the case before
+    persisting — making its prefix match perfectly, so the prefix check passed
+    and the divergent entries were stored. The result was a chain whose own
+    verifier rejects it: duplicate sequence 0, both chaining onto genesis.
+    """
+    from core.verdict_stream import verify_stream
+
+    store.create_case("STALE", {"hostname": "H"}, "perito")
+    a_case = store.get_case("STALE")
+    b_case = store.get_case("STALE")          # the concurrent reader
+    sa, sb = _sealing_session(a_case), _sealing_session(b_case)
+    va = sa.adjudicate(sa.run_hunt(["pslist", "netstat"], "A")["window_id"])
+    vb = sb.adjudicate(sb.run_hunt(["pslist", "netstat"], "B")["window_id"])
+    assert va["sequence"] == vb["sequence"] == 0, "both minted against genesis"
+
+    store.apply_cycle("STALE", list(sa._entries), [va], [], a_case["mission"])
+    with pytest.raises(chain_store.ConcurrentModificationError,
+                       match="minted against state"):
+        store.apply_cycle("STALE", list(sb._entries), [vb], [], b_case["mission"])
+
+    stored = store.get_case("STALE")["entries"]
+    assert len(stored) == 1
+    assert verify_stream(stored)["chain_ok"], "the sealed chain must still verify"
+
+
+def test_a_second_cycle_that_read_current_state_is_accepted(store):
+    """The continuity check must not refuse a legitimate append: a cycle that
+    read the case *after* the first one committed continues the chain."""
+    from core.verdict_stream import verify_stream
+
+    store.create_case("CONT", {"hostname": "H"}, "perito")
+    first = store.get_case("CONT")
+    s1 = _sealing_session(first, "CONT")
+    v1 = s1.adjudicate(s1.run_hunt(["pslist", "netstat"], "one")["window_id"])
+    store.apply_cycle("CONT", list(s1._entries), [v1], [], first["mission"])
+
+    second = store.get_case("CONT")           # reads the committed state
+    s2 = _sealing_session(second, "CONT")
+    v2 = s2.adjudicate(s2.run_hunt(["pslist", "netstat"], "two")["window_id"])
+    store.apply_cycle("CONT", list(s2._entries), [v2], [], second["mission"])
+
+    stored = store.get_case("CONT")["entries"]
+    assert [e["sequence"] for e in stored] == [0, 1]
+    assert verify_stream(stored)["chain_ok"]

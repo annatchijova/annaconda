@@ -264,3 +264,54 @@ def test_settled_lines_of_inquiry_are_given_up_before_open_ones():
     kept = m["hypotheses"]
     assert len(kept) == mem.HYPOTHESIS_LIMIT
     assert sum(1 for h in kept if h["status"] == "open") == 10
+
+
+def test_an_open_escalation_is_distinct_from_the_derived_view():
+    """mission["escalation"] is a derived view that falls back to the latest
+    entry once everything is acknowledged, so it is never None again. Anything
+    asking "does this case still need a person?" must ask has_open_escalation,
+    or it answers "already handled" forever."""
+    m = mem.new_mission("OPEN")
+    mem.escalate(m, actor="engine", why="the engine adjudicated MALICE_HIGH",
+                 what_to_check="contain it", sealed_basis=_sealed())
+    assert mem.has_open_escalation(m) is True
+
+    mem.acknowledge_escalation(m, actor="perito-01", index=0, note="isolated")
+    assert mem.has_open_escalation(m) is False
+    assert m["escalation"] is not None, "the derived view still shows the last one"
+
+
+def test_ids_do_not_collide_once_the_lists_are_capped():
+    """Ids were minted as len(list)+1, so once _trim caps the list the length
+    stops growing and every later entry reuses the same id — after which
+    update_hypothesis settles whichever collision it finds first."""
+    m = mem.new_mission("IDS")
+    for i in range(mem.HYPOTHESIS_LIMIT + 20):
+        mem.add_hypothesis(m, actor="a", text=f"line {i}")
+    ids = [h["id"] for h in m["hypotheses"]]
+    assert len(ids) == len(set(ids)), "duplicate hypothesis ids after trimming"
+
+    # and settling one settles that one, not an older namesake
+    target = m["hypotheses"][-1]["id"]
+    mem.update_hypothesis(m, actor="a", hypothesis_id=target,
+                          status="refuted", rationale="no")
+    settled = [h for h in m["hypotheses"] if h["status"] == "refuted"]
+    assert len(settled) == 1 and settled[0]["id"] == target
+
+
+def test_an_escalation_is_acknowledged_by_id_not_by_position():
+    """The list is capped, so a position a caller read a moment ago can point at
+    a different escalation by the time it is used — silencing one nobody
+    handled."""
+    m = mem.new_mission("ACKID")
+    first = mem.escalate(m, actor="engine", why="the engine adjudicated MALICE_HIGH",
+                         what_to_check="contain it", sealed_basis=_sealed())
+    mem.escalate(m, actor="fleet-commander", why="a routine question",
+                 what_to_check="review it", sealed_basis=[])
+    assert first["id"] and first["id"] != m["escalations"][1]["id"]
+
+    took = mem.acknowledge_escalation(m, actor="perito-01", index=first["id"],
+                                      note="isolated")
+    assert took["id"] == first["id"]
+    assert m["escalations"][1]["acknowledged"] is False
+    assert mem.verify_mission(m)["memory_ok"]

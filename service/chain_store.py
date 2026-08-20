@@ -99,6 +99,21 @@ def head_of(item) -> Optional[str]:
     return None
 
 
+def prev_of(item) -> Optional[str]:
+    """The hash an entry chains onto, when it declares one.
+
+    The two chains name it differently — the sealed verdict stream uses
+    ``prev_entry_hash``, the mission journal uses ``prev_hash`` — so read
+    either. Entries without one simply skip the continuity check.
+    """
+    if isinstance(item, dict):
+        for key in ("prev_entry_hash", "prev_hash"):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
 def segment_id(field: str, number: int) -> str:
     return f"{field}-{number:06d}"
 
@@ -167,6 +182,23 @@ class SegmentedChain:
                 f"{stored_head[:12]}… but the writer's entry at that position "
                 f"is {writer_head[:12]}… — another cycle wrote this case in "
                 f"between")
+
+        # The prefix matching is not enough on its own. A writer can hold a
+        # correct prefix and still be appending entries minted against a stale
+        # head: the sealed verdict stream is built by a *session* constructed
+        # from the case as it was read, so two concurrent cycles mint entries
+        # with the same sequence number and the same prev hash, and the second
+        # writer then re-reads the case — making its prefix match perfectly.
+        # Storing that produces a chain whose own verifier rejects it.
+        # So the first NEW entry must chain onto the stored head.
+        if stored_head and len(chain) > already:
+            writer_prev = prev_of(chain[already])
+            if writer_prev and writer_prev != stored_head:
+                raise ConcurrentModificationError(
+                    f"chain {self.field!r}: the writer's first new entry chains "
+                    f"onto {writer_prev[:12]}… but the stored chain ends at "
+                    f"{stored_head[:12]}… — it was minted against state that "
+                    f"has since been replaced")
 
     def append_from(self, index: dict, chain: list) -> dict:
         """Store whatever part of ``chain`` is not yet committed.
