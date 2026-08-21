@@ -62,6 +62,27 @@ impossibility — a C2 beacon observed before its own process existed), pivots t
 check for persistence, and narrates the sealed result. Its full decision log is
 shown step by step.
 
+## Standards & interoperability
+
+A sealed case does not stay locked inside annaconda. It speaks the DFIR
+community's languages — each of these is **pure output of the seal, never an
+input to it**: derived from the already-sealed record, referencing the hashes
+rather than recomputing them, deterministic (re-exporting the same case is
+byte-identical). All are live on the deployed service.
+
+| Output | What it is | Endpoint / tool |
+|--------|-----------|-----------------|
+| **STIX 2.1** | The sealed case as a STIX bundle for a SIEM, a TIP (MISP), or a court exhibit — the host, the ATT&CK techniques, and each sealed verdict as an SDO. | `GET /cases/{id}/stix` |
+| **CACAO 2.0** | One autonomous investigation as an OASIS playbook — each step a sealed journal entry — for a SOAR platform or Google SecOps. | `GET /cases/{id}/cacao` |
+| **Independent verifier** | `annaconda-verify` — a **stdlib-only** tool that imports *nothing* from annaconda (its own encoder, held in lockstep by a test) so a third party can confirm a sealed exhibit on an air-gapped machine without trusting us. | `GET /cases/{id}/exhibit` → `python3 -m tools.verify_bundle exhibit.json` |
+| **Sigma synthesis** | A sealed MALICE window becomes a portable Sigma detection draft (experimental, for human review). | the `detection-engineer` agent |
+| **SecOps push** | On each sealed escalation, the STIX bundle is published to a Pub/Sub topic a Chronicle feed subscribes to. | `POST /cases/{id}/push-to-secops` |
+| **Threat-intel enrichment** | A window's indicators matched against VirusTotal / GTI (public) and a MISP/OpenCTI feed (the team's own) — sealed beside the evidence, never a decider. | the `threat-intel` agent |
+
+Enrichment (VirusTotal, MISP) and the SecOps push all degrade **honestly**: with
+no key, feed, or topic configured, `/health` reports the component `unavailable`
+rather than faking a result.
+
 ## Architecture
 
 ```
@@ -81,13 +102,29 @@ The agent orchestrates and explains; the sealed engine decides. See
 [`/architecture`](https://vigia-live-1028999311218.us-central1.run.app/architecture)
 for the full walkthrough.
 
-**The agents.** The *commander* (`agent/autonomy.py`) works cases unattended,
-tasking a fleet of specialists with strictly disjoint tool contracts
-(`agent/fleet.py`): two collection hunters and a correlator that alone reaches
-the sealed core. The *investigator* (`agent/purple_team_agent.py`) drives the
-hunt loop for a human operator; the *mentor* (`agent/consult_agent.py`) teaches
-junior examiners with read-only tools. All of them act, delegate and explain;
-none of them decides.
+### The agents
+
+A commander plus a fleet of specialists, each bound to a **strictly disjoint
+tool contract** (`agent/fleet.py`) — no tool belongs to two roles, a test proves
+it (`tests/test_fleet.py`), and only one role can reach the sealed core. They all
+act, delegate and explain; **none of them decides** the verdict.
+
+| Agent | Role | Reaches the sealed core? |
+|-------|------|--------------------------|
+| **fleet-commander** (`agent/autonomy.py`) | Works a case unattended across cycles: reads the mission memory, tasks the specialists it is cleared to task, decides when to look again / escalate / stand down. Holds no collection or adjudication tool of its own. | No — only by tasking someone cleared |
+| **dispatcher** | Triages the case and routes collection to the hunters. | No |
+| **windows-hunter** | Collects running processes + network connections as one sealed window. | No |
+| **persistence-agent** | Collects the persistence surface (scheduled tasks, process-creation logs). | No |
+| **threat-intel** | Enriches a window's indicators with VirusTotal / Google Threat Intelligence reputation — sealed *beside* the evidence, never a decider. | No |
+| **detection-engineer** | Turns a sealed MALICE window into portable **Sigma** draft rules (experimental, for human review). | No |
+| **correlator** | Adjudicates a frozen window into a sealed verdict and verifies the chain. | **Yes — the only one** |
+
+Two more agents run outside the fleet: the **investigator**
+(`agent/purple_team_agent.py`) drives the hunt loop for a human operator, and the
+**mentor** (`agent/consult_agent.py`) teaches junior examiners with read-only
+tools. Every agent is published in the enterprise catalog with the hash of its
+tool manifest; the runtime refuses to load one whose manifest is not approved
+(`agent/registry.py`, `GET /registry`).
 
 **The analyst workflow.** A *case* (`service/case_store.py`) is one host's
 tamper-evident record: each investigation run continues the case's sealed chain,
@@ -174,8 +211,8 @@ cover, is in [docs/COMPLIANCE.md](docs/COMPLIANCE.md).
 | Requirement | How |
 |-------------|-----|
 | Gemini 3.5+ | `gemini-3.5-flash` via **Vertex AI** (`GOOGLE_GENAI_USE_VERTEXAI`), through the Cloud Run service identity |
-| Google Agent Framework | **Google ADK** — two agents (investigator, mentor) |
-| Google Cloud service | **Cloud Run** (backend) + **Firestore** (case persistence) + **Cloud Scheduler → Pub/Sub** (unattended operation) + **Vertex AI** |
+| Google Agent Framework | **Google ADK** — an autonomous commander tasking a fleet of specialists (disjoint tool contracts, sealed registry), plus a single-operator investigator and a mentor. See [The agents](#the-agents). |
+| Google Cloud service | **Cloud Run** (backend) + **Firestore** (case persistence) + **Cloud Scheduler → Pub/Sub** (unattended operation, and the sealed-verdict push to SecOps) + **Vertex AI** |
 
 Against the **Fortified Enterprise Fleet** criteria specifically:
 
@@ -268,9 +305,12 @@ per-host Firestore-backed cases with one continuing sealed chain, the
 prompt-injection defense (two Google models, one hash), autonomous sweeps
 (Scheduler → Pub/Sub → Cloud Run), ABSTAIN-as-memory reentry, and a
 **specialized fleet** — a dispatcher that routes collection to per-domain
-hunters and a correlator that alone reaches the sealed core, with strictly
-disjoint tool contracts (verified by a test, shown on `/exhibit` under **Run
-the fleet**), and a **sealed agent registry** — every agent published with a
+hunters, a threat-intel enricher and a detection-engineer, and a correlator that
+alone reaches the sealed core, with strictly disjoint tool contracts (verified by
+a test, shown on `/exhibit` under **Run the fleet**), the DFIR interoperability
+outputs (STIX, CACAO, Sigma, the SecOps push, MISP enrichment, and an independent
+stdlib-only verifier — see [Standards & interoperability](#standards--interoperability)),
+and a **sealed agent registry** — every agent published with a
 version and the hash of its tool manifest (same encoder that seals verdicts);
 the runtime refuses to load an agent whose manifest is not approved
 (`GET /registry`; `agent/registry.py`), **OpenTelemetry → Cloud Trace** tracing
@@ -286,10 +326,13 @@ delegation by department, data class and region. Next:
 - **A live Velociraptor lab**, so the collection path runs against enrolled
   Windows endpoints rather than bundled telemetry — infrastructure, not code
   (the transport is real and proven).
-- **A Firestore transaction around the case write.** Two cycles racing one case
-  are now *detected and refused* — the loser gets a 409 and the record stays
-  intact ([Round 4](docs/RED_TEAM_AUDIT.md)) — but a transaction would turn
-  that refusal into a retry the caller never sees.
+
+An external red-team (Kimi) audited the build; every finding was verified against
+the live code and the P1/P2 items fixed — including **an atomic Firestore
+transaction around the case write**, so two cycles racing one case can no longer
+overwrite a sealed run (the loser is refused; verified inductively against real
+Firestore). The full audit and fixes are in
+[docs/RED_TEAM_AUDIT_ROUND1_EXTERNAL.md](docs/RED_TEAM_AUDIT_ROUND1_EXTERNAL.md).
 
 ## License & attributions
 
