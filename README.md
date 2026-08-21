@@ -4,9 +4,9 @@
 an endpoint as an attack unfolds and seals a reproducible, MITRE-mapped verdict.
 A fleet of Google ADK + Gemini agents works cases **unattended** — choosing what
 to hunt, carrying an investigation's memory across weeks, escalating to a human
-when one is needed — **but the language model is out of the decision path.** The
-deterministic engine produces and seals the verdict *before* any model describes
-it. Swap the narrator and the verdict, its score, and its hash never change.
+when one is needed — while the deterministic engine keeps the verdict sealed
+*before* any model describes it. Swap the narrator and the verdict, its score,
+and its hash never change.
 
 > Built for the **All Things Agentic Hackathon** (Google / Gemini).
 > Live: **https://vigia-live-1028999311218.us-central1.run.app**
@@ -29,6 +29,17 @@ verdict:
 
 This is what makes the output defensible: reproducible, auditable, and immune to
 whatever the model happens to say.
+
+## Judge shortcut
+
+If you only have 30 seconds:
+
+- open `/exhibit`,
+- run the attack scenario,
+- press **Ask the agent**,
+- watch the narrator get baited while the sealed verdict stays MALICE.
+
+Then open `/fleet-console` and watch the unattended cycle work a live case.
 
 ### The genuine threat: the attacker controls the evidence
 
@@ -61,6 +72,13 @@ autonomously collects telemetry, adjudicates a sealed MALICE verdict
 impossibility — a C2 beacon observed before its own process existed), pivots to
 check for persistence, and narrates the sealed result. Its full decision log is
 shown step by step.
+
+## Canonical demo path
+
+1. Open `/exhibit`.
+2. Run the attack scenario and ask the agent.
+3. Observe that the narrator can be baited but the verdict cannot move.
+4. Open `/fleet-console` to see the autonomous weekly loop on a live case.
 
 ## Standards & interoperability
 
