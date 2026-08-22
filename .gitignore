@@ -33,3 +33,7 @@ dist/
 
 # Scratch prototypes and smoke outputs (not part of the deliverable)
 scratch/
+
+# planning docs — kept local, not committed
+PLAN.md
+IMPROVEMENTS_PLAN.md
