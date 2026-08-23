@@ -134,11 +134,45 @@ def build_specialist(name: str, session: PurpleTeamSession, *, model=None):
     )
 
 
-def dispatch_investigation(session: PurpleTeamSession) -> dict:
+# What each fleet role touches, so the catalog is asked the same question the
+# commander's task_hunter asks: may THIS department drive THIS contract, over
+# THIS data class. Fixed here, never chosen by a caller or a model.
+_FLEET_CLEARANCE = {
+    "dispatcher": ["case_memory"],
+    "windows-hunter": ["endpoint_telemetry"],
+    "persistence-agent": ["persistence_artifacts"],
+    "threat-intel": ["external_enrichment"],
+    "correlator": ["sealed_verdicts"],
+    "detection-engineer": ["sealed_verdicts"],
+}
+
+
+def authorize_fleet(department: str) -> None:
+    """Ask the catalog about every role the dispatch will drive, before it
+    drives any of them.
+
+    The fleet is a composition of tool contracts, and running it end to end is
+    therefore several taskings, not one. Nothing used to ask the catalog about
+    any of them on this path (red-team A-3): only the autonomous commander's
+    delegations were gated. Checking all of them up front — rather than failing
+    half way through — means a department either runs the whole fleet or none
+    of it, instead of collecting evidence it may not adjudicate.
+    """
+    from agent import catalog
+    for name, data_classes in sorted(_FLEET_CLEARANCE.items()):
+        catalog.authorize(name, department=department, data_classes=data_classes)
+
+
+def dispatch_investigation(session: PurpleTeamSession, *,
+                           department: str = "incident-response") -> dict:
     """The dispatcher runs the fleet over a case: the hunters collect (each its
     own disjoint window), the correlator adjudicates and seals. Deterministic
     orchestration — reliable for a live demo — with every step attributed to the
-    specialist that owns that tool contract."""
+    specialist that owns that tool contract.
+
+    ``department`` is who is running it; the catalog refuses a department that
+    is not published for every role the dispatch drives."""
+    authorize_fleet(department)
     dispatch = dispatcher_tools(session)[0]
     hunt_windows = windows_hunter_tools(session)[0]
     hunt_persistence = persistence_tools(session)[0]

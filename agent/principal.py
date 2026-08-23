@@ -47,6 +47,34 @@ class UnauthenticatedPrincipalError(PermissionError):
     verified identity."""
 
 
+DEFAULT_DEPARTMENT_ENV = "VIGIA_DEFAULT_DEPARTMENT"
+
+# What an unauthenticated caller that names no department is treated as. The
+# deployed demo has no identity provider, so this is the posture that keeps it
+# usable — and it was, accidentally, the most privileged department this
+# deployment publishes: incident-response is cleared to task every agent in the
+# catalog (red-team A-5). That may still be the right demo setting, but it has
+# to be a stated posture rather than whichever constant happened to be in scope
+# at the call site, so it is named here, overridable, reported on /health, and
+# refused outright when it is not a published department.
+DEFAULT_DEPARTMENT = "incident-response"
+
+
+def default_department() -> Optional[str]:
+    """The department an unauthenticated caller is treated as, or None when the
+    deployment's configured default is not a published department — in which
+    case an unauthenticated tasking is refused rather than quietly promoted."""
+    configured = os.environ.get(DEFAULT_DEPARTMENT_ENV, "").strip().lower()
+    candidate = configured or DEFAULT_DEPARTMENT
+    if candidate not in catalog.DEPARTMENTS:
+        if configured:
+            log.warning("%s names unknown department %r — unauthenticated "
+                        "taskings will be refused", DEFAULT_DEPARTMENT_ENV,
+                        configured)
+        return None
+    return candidate
+
+
 def require_authenticated() -> bool:
     return os.environ.get(REQUIRE_AUTH_ENV, "").strip().lower() in {"1", "true", "yes"}
 
@@ -136,17 +164,45 @@ def resolve(*, authorization_header: Optional[str] = None,
         if department:
             return {"department": department, "identity": email,
                     "authenticated": True, "how": "verified identity token"}
-        # A real, verified identity that this deployment has not rostered is
-        # not an anonymous caller — say precisely that, and do not silently
-        # grant it whatever it asked for.
-        log.warning("verified identity %s is not in the department roster", email)
-        return {"department": None, "identity": email, "authenticated": False,
-                "how": "verified identity, not in the department roster"}
+        # A real, verified identity this deployment has not rostered used to be
+        # refused outright — while the same caller sending NO header at all was
+        # allowed, as whatever department it asked for (red-team A-5). That is
+        # an inversion, not a defence: anyone holding such a token simply drops
+        # it. Authenticating must never leave a caller worse off than staying
+        # anonymous, so this falls through to the asserted path — with the
+        # identity we did verify recorded, which is strictly more than an
+        # anonymous caller gives us, and with `authenticated` still False,
+        # because a department nobody rostered is exactly that.
+        log.warning("verified identity %s is not in the department roster — "
+                    "treating this tasking as asserted, not refusing it", email)
+        return {"department": _claimed(claimed_department, default_department),
+                "identity": email, "authenticated": False,
+                "how": "verified identity, not in the department roster — "
+                       "treated as asserted"}
 
-    department = (claimed_department or default_department or "").strip().lower()
-    return {"department": department or None, "identity": None,
-            "authenticated": False,
+    return {"department": _claimed(claimed_department, default_department),
+            "identity": None, "authenticated": False,
             "how": "asserted in the request, no verified identity"}
+
+
+def _claimed(claimed: Optional[str], fallback: Optional[str]) -> Optional[str]:
+    """The department an unverified request may act as, or None.
+
+    A claimed department was previously lowercased and returned as-is, whatever
+    it said. Nothing between here and the catalog rejected it, so an arbitrary
+    caller-chosen string travelled into the case's mission journal and was
+    SEALED there as the department that ran the cycle (red-team A-5). A claim
+    this deployment does not publish is not a department; it resolves to None
+    and `enforce` refuses it.
+    """
+    department = (claimed or "").strip().lower()
+    if department:
+        if department in catalog.DEPARTMENTS:
+            return department
+        log.warning("request claimed unknown department %r — refusing rather "
+                    "than recording it", claimed)
+        return None
+    return fallback or None
 
 
 def enforce(principal: dict) -> dict:

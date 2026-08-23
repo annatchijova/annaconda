@@ -98,25 +98,45 @@ def _trim(mission: dict) -> None:
     dropped.setdefault("escalations", 0)
     mission.setdefault("escalations", [])
 
-    def cap(items: list, limit: int, is_settled) -> list:
-        """Keep the newest ``limit`` entries, giving up settled ones first."""
+    def cap(items: list, limit: int, priority) -> list:
+        """Keep ``limit`` entries, giving up the lowest priority first.
+
+        ``priority(item, i)`` returns a sort key; the smallest keys are dropped.
+        """
         excess = len(items) - limit
         if excess <= 0:
             return items
-        # Oldest settled entries go first; only then oldest open ones.
         order = sorted(range(len(items)),
-                       key=lambda i: (0 if is_settled(items[i]) else 1, i))
+                       key=lambda i: priority(items[i], i))
         drop = set(order[:excess])
         return [item for i, item in enumerate(items) if i not in drop]
 
-    for key, limit, settled in (
-        ("hypotheses", HYPOTHESIS_LIMIT, lambda h: h.get("status") != "open"),
-        ("open_questions", QUESTION_LIMIT, lambda q: bool(q.get("resolved"))),
-        ("tried_hunts", TRIED_HUNTS_LIMIT, lambda t: True),
-        ("escalations", ESCALATION_LIMIT, lambda e: bool(e.get("acknowledged"))),
+    def by_age(is_settled):
+        """Settled entries go first, oldest before newest."""
+        return lambda item, i: (0 if is_settled(item) else 1, i)
+
+    def by_severity(entry, i):
+        """Escalations give up handled history first, then the least severe.
+
+        Age alone was the rule, so an UNACKNOWLEDGED escalation resting on a
+        sealed MALICE verdict was dropped before newer routine notes — and
+        escalate_to_human has no per-cycle limit, so filling the cap was a
+        thing an agent could simply do (red-team A-7). _escalation_rank already
+        existed to say which one matters; it was only consulted when deriving
+        the view, never when deciding what to lose.
+        """
+        return (0 if entry.get("acknowledged") else 1, _escalation_rank(entry), i)
+
+    for key, limit, priority in (
+        ("hypotheses", HYPOTHESIS_LIMIT,
+         by_age(lambda h: h.get("status") != "open")),
+        ("open_questions", QUESTION_LIMIT,
+         by_age(lambda q: bool(q.get("resolved")))),
+        ("tried_hunts", TRIED_HUNTS_LIMIT, by_age(lambda t: True)),
+        ("escalations", ESCALATION_LIMIT, by_severity),
     ):
         before = len(mission[key])
-        mission[key] = cap(mission[key], limit, settled)
+        mission[key] = cap(mission[key], limit, priority)
         dropped[key] += before - len(mission[key])
 
 
@@ -245,9 +265,95 @@ def record(mission: dict, *, actor: str, action: str, detail: dict) -> dict:
     return entry
 
 
+def _journal_backing(mission: dict) -> list:
+    """Every working-state entry must be traceable to a sealed journal entry.
+
+    The journal was chained and the WORKING STATE was not (red-team A-8), and
+    the working state is what the system actually reads: ``standing_down``
+    decides whether a case is ever worked again, ``tried_hunts`` decides which
+    surface gets collected next, an ``acknowledged`` flag decides whether a
+    malicious verdict still demands a person. All of it could be rewritten with
+    the journal untouched, and ``verify_mission`` still said ``memory_ok``.
+
+    The check is one-directional on purpose: every item in the summary must be
+    backed by the journal, never the reverse. ``_trim`` legitimately drops
+    entries the journal keeps, so demanding equality would fail on healthy
+    memory. What it catches is state that was ADDED or FLIPPED without the
+    mutation that should have produced it.
+    """
+    errors = []
+    journal = [e for e in mission.get("journal", []) if isinstance(e, dict)]
+
+    def details(action):
+        return [e.get("detail") or {} for e in journal if e.get("action") == action]
+
+    if mission.get("standing_down") and not details("stand_down"):
+        errors.append(
+            "standing_down is set but no stand_down was ever recorded — the "
+            "case would never be worked again on the strength of state nobody "
+            "wrote")
+
+    plan = mission.get("next_action")
+    if plan and not any(d.get("due_utc") == plan.get("due_utc")
+                        and d.get("action") == plan.get("action")
+                        for d in details("schedule_next_action")):
+        errors.append("next_action does not match any recorded schedule")
+
+    recorded_cycles = [d.get("cycle") for d in details("begin_cycle")
+                       if isinstance(d.get("cycle"), int)]
+    if mission.get("cycles", 0) != (max(recorded_cycles) if recorded_cycles else 0):
+        errors.append(
+            f"cycles is {mission.get('cycles')!r} but the journal records "
+            f"{max(recorded_cycles) if recorded_cycles else 0}")
+
+    collected = {json.dumps(d.get("hunts"), sort_keys=True)
+                 for d in details("record_collection")}
+    for tried in mission.get("tried_hunts") or []:
+        if json.dumps(tried.get("hunts"), sort_keys=True) not in collected:
+            errors.append(
+                f"tried_hunts names a collection {tried.get('hunts')!r} that no "
+                f"record_collection entry backs — the planner would skip a "
+                f"surface nobody collected")
+
+    for field, actions, label in (
+        ("hypotheses", ("add_hypothesis", "update_hypothesis"), "hypothesis"),
+        ("open_questions", ("note_open_question", "resolve_open_question"),
+         "open question"),
+        ("escalations", ("escalate_to_human",), "escalation"),
+    ):
+        known = {d.get("id") for action in actions for d in details(action)}
+        for item in mission.get(field) or []:
+            if item.get("id") not in known:
+                errors.append(
+                    f"{label} {item.get('id')!r} appears in the summary but the "
+                    f"journal never recorded it")
+
+    acknowledged = {d.get("escalation_id")
+                    for d in details("acknowledge_escalation")}
+    for entry in mission.get("escalations") or []:
+        if entry.get("acknowledged") and entry.get("id") not in acknowledged:
+            errors.append(
+                f"escalation {entry.get('id')!r} is marked acknowledged but no "
+                f"acknowledge_escalation was recorded — an escalation stopped "
+                f"demanding attention without anybody taking it up")
+    return errors
+
+
 def verify_mission(mission: dict) -> dict:
-    """Re-derive the journal chain. Reports every break, not just the first —
-    an examiner needs the whole picture, not the earliest symptom."""
+    """Re-derive the journal chain, and check the working state against it.
+
+    Two questions, and the second is the one that was missing. The chain proves
+    nobody rewrote the fleet's history. It says nothing about the summary the
+    system actually reads — ``standing_down``, ``next_action``, ``tried_hunts``,
+    the hypothesis and escalation lists — which lived outside every hash, so
+    memory an attacker had weeks to edit could be edited exactly where it
+    changes behaviour and still verify (red-team A-8). ``_journal_backing``
+    closes that: every entry in the working state must be traceable to the
+    sealed mutation that produced it.
+
+    Reports every break, not just the first — an examiner needs the whole
+    picture, not the earliest symptom.
+    """
     errors = []
     prev = GENESIS_HASH
     for i, entry in enumerate(mission.get("journal", [])):
@@ -267,6 +373,7 @@ def verify_mission(mission: dict) -> dict:
     head_ok = prev == mission.get("memory_head", GENESIS_HASH)
     if not head_ok:
         errors.append("memory_head does not match the end of the journal")
+    errors.extend(_journal_backing(mission))
     return {
         "memory_ok": not errors,
         "journal_entries": len(mission.get("journal", [])),
@@ -461,6 +568,53 @@ def has_open_escalation(mission: dict) -> bool:
     """
     return any(not e.get("acknowledged")
                for e in (mission.get("escalations") or []))
+
+
+def escalation_covers_verdict(mission: dict, entry_hash: str) -> bool:
+    """Whether some escalation already rests on THIS sealed verdict.
+
+    The engine's mandatory escalation used to be gated on "is any escalation
+    still open" (red-team A-2). That made the guarantee suppressible by call
+    order: the commander raising any escalation — a routine note, before it
+    adjudicated anything — left one open, so the engine's check saw "already
+    handled" and a sealed MALICE verdict reached nobody with its basis attached.
+
+    The honest question is per-verdict, not per-case: has anyone been told about
+    *this* entry_hash. Acknowledged escalations count — a human took that verdict
+    up — so a case does not re-raise what was already handled, while a later
+    cycle sealing a FRESH malicious verdict always does.
+    """
+    if not entry_hash:
+        return False
+    for entry in mission.get("escalations") or []:
+        for basis in entry.get("sealed_basis") or []:
+            if basis.get("entry_hash") == entry_hash:
+                return True
+    return False
+
+
+def has_open_escalation_for_state(mission: dict, prefix: str) -> bool:
+    """Whether an UNACKNOWLEDGED escalation already rests on a verdict of this
+    kind.
+
+    Deliberately coarser than ``escalation_covers_verdict``, and for a different
+    question. A malicious verdict is a specific fact that must be reported once
+    per verdict. An unresolved one is a standing condition — "this host cannot
+    be concluded on" — so what matters is whether a person is already looking at
+    that gap. Once somebody acknowledges it and the gap persists, the next
+    report is warranted, not noise.
+
+    Per-KIND, never per-case: an open malice escalation must not suppress an
+    abstain one, which is the shape of the bug that made the engine's guarantee
+    suppressible in the first place (red-team A-2).
+    """
+    for entry in mission.get("escalations") or []:
+        if entry.get("acknowledged"):
+            continue
+        for basis in entry.get("sealed_basis") or []:
+            if str(basis.get("verdict_state", "")).startswith(prefix):
+                return True
+    return False
 
 
 def _current_escalation(mission: dict) -> Optional[dict]:

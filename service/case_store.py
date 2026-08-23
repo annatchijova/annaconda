@@ -99,6 +99,13 @@ def _summarize(case: dict) -> dict:
         "examiner_id": case.get("examiner_id"),
         "status": case.get("status", "open"),
         "worst_verdict": case.get("worst_verdict"),
+        # status is the case's CURRENT reading, worst_verdict its worst ever.
+        # They legitimately differ after an abstain is superseded — so say when
+        # they do, rather than letting the row show only the optimistic one
+        # (red-team A-6).
+        "supersedes_unresolved": bool(
+            (case.get("worst_verdict") or "").startswith("ABSTAIN")
+            and case.get("status") not in (None, "abstain")),
         "sealed_verdicts": _chain_count(case, "entries"),
         "runs": case.get("runs", 0),
         "created_utc": case.get("created_utc"),
@@ -191,6 +198,24 @@ def _update_open_question(case: dict, verdicts: list) -> None:
         # that already has a worse verdict in its history. A case whose worst is
         # MALICE must never display "benign" just because a later partial
         # collection resolved cleanly (red-team finding, self-corrected).
+        #
+        # ABSTAIN deliberately does NOT join that list: an abstain is a fact
+        # about a collection, not about the host, so a later complete
+        # collection is allowed to supersede it — that is the reentry loop this
+        # store exists to support.
+        #
+        # But the transition is looser than it reads (red-team A-6): it fires on
+        # ANY later conclusive verdict, including one from a DIFFERENT surface
+        # than the one the abstain said was missing. ABSTAIN_INSUFFICIENT asks
+        # to "correlate processes with their network activity in one window";
+        # a clean verdict on the persistence surface does not answer that, and
+        # the case still reads benign while worst_verdict still reads ABSTAIN.
+        # Closing that properly means tracking which collection answers which
+        # gap, which this store cannot see from verdict states alone — it is
+        # recorded as an open item rather than papered over here. What IS closed:
+        # the divergence is now visible in the queue row (see _summarize), and
+        # the autonomous planner no longer treats such a case as quiet (see
+        # autonomy.is_unresolved).
         worst = case.get("worst_verdict") or ""
         if not (worst.startswith("MALICE") or worst == "ESCALATE"):
             case["status"] = "malice" if concluded.startswith("MALICE") else "benign"
