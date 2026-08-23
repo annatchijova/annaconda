@@ -663,6 +663,57 @@ implementación: son fracturas en la junta entre dos piezas correctas.
 
 ---
 
+## Estado de remediación
+
+Cada fix se escribió con su test **rojo primero**, contra el árbol vulnerable, y
+está fijado en `tests/test_redteam_round2_fixes.py` (29 pruebas, con sus
+controles negativos). Los scripts de `repro/` que reimplementaban lógica ahora
+llaman al código real, así que son testigos del árbol vivo, no fotos del viejo.
+
+| ID | Estado | Commit | Qué cambió |
+|----|--------|--------|------------|
+| A-1 | **Cerrado** | `8cf1821` | La entrada v2 sella `host_hash`; `verify_stream(case_id=, host=)` y `verify_bundle` comprueban la identidad reclamada contra los sellos. El exhibit reetiquetado ahora da `FAIL` (exit 1) nombrando ambas sustituciones. |
+| A-2 | **Cerrado** | `0db51d1` | `escalation_covers_verdict` + `raise_unescalated_malice`: la garantía es por `entry_hash`, no por "¿hay alguna escalación abierta?". Los dos órdenes de llamada disparan. |
+| A-3 | **Cerrado** | `808e65f` | `_authorize` en el borde HTTP de las cuatro rutas que alcanzan el núcleo sellado; `authorize_fleet` para los seis contratos del dispatch. |
+| A-9 | **Cerrado** | `808e65f` | `run_cycle` autoriza al comandante antes del chequeo de vencimiento: un departamento no publicado no llega ni a la memoria del caso. |
+| A-5 | **Cerrado (parcial, ver abajo)** | `1d17d3b` | Eliminada la inversión: una identidad verificada fuera del roster queda como asertada, no rechazada. El departamento reclamado se valida contra el catálogo. `default_department()` es una postura declarada y visible en `/health`. |
+| A-4 | **Cerrado** | `eb7029b` | `is_unresolved` (ligado al hueco ABIERTO, no a `worst_verdict`), techo de 12 h, `stand_down` rechazado, y `raise_unresolved_abstain` tras 3 ciclos sin concluir. |
+| A-6 | **Parcial, por decisión** | `eb7029b` | Ver abajo. |
+| A-7 | **Cerrado** | `989abac` | La ruta acepta el id estable; `_trim` cede por severidad (`_escalation_rank`) antes que por antigüedad. |
+| A-8 | **Cerrado como evidencia** | `989abac` | `_journal_backing`: todo estado operativo debe rastrearse a la mutación sellada que lo produjo. Es tamper-**evidencia**, no tamper-prevención. |
+
+### A-6 — no aplicado del todo, y por qué
+
+La transición `ABSTAIN → status "benign"` está fijada **a propósito** por dos
+pruebas en `tests/test_case_store.py`: un ABSTAIN es un hecho sobre una
+*recolección*, no sobre el host, y una recolección posterior completa puede
+superarlo. Prohibir la transición cambiaba un estado absorbente por otro —
+todo caso que alguna vez abstuvo quedaría etiquetado así para siempre. No
+sobrescribí ese diseño.
+
+Lo que sí se cerró:
+- la divergencia ya no es silenciosa — la fila de la cola lleva
+  `supersedes_unresolved` cuando `status` y `worst_verdict` discrepan;
+- la consecuencia peligrosa está cerrada por A-4: mientras el hueco siga
+  abierto el planner no puede aparcar ni cerrar el caso, diga lo que diga
+  `status`.
+
+Lo que **sigue abierto**, registrado en vez de disimulado: la transición se
+dispara con *cualquier* veredicto concluyente posterior, incluido uno de una
+superficie distinta de la que el ABSTAIN declaró faltante. `ABSTAIN_INSUFFICIENT`
+pide "correlacionar procesos con su actividad de red en una ventana"; un
+veredicto limpio sobre la superficie de persistencia no responde a eso.
+Cerrarlo exige que el store sepa qué recolección responde a qué hueco —
+información que hoy no tiene, porque solo ve estados de veredicto.
+
+### Otros items abiertos
+
+| Item | Origen | Por qué sigue abierto |
+|------|--------|------------------------|
+| El default de un llamante anónimo es `incident-response`, el departamento con acceso a los 9 agentes | A-5 | Cambiarlo rompe el ciclo autónomo del demo público. Ahora es explícito (`VIGIA_DEFAULT_DEPARTMENT`), visible en `/health` y rechazado si no nombra un departamento publicado — pero sigue siendo la postura por defecto. Es una decisión de producto. |
+| Reconocer una escalación no exige credencial | A-7 | `_principal_for` sin `claimed` resuelve al default asertado, y el `actor` registrado es el `examiner_id` que el llamante escribe. Reconocer es lo que hace que un veredicto malicioso deje de pedir atención. El registro dice `acknowledged_by_authenticated: False`, así que es honesto, no oculto — pero exigir identidad verificada aquí es la misma decisión de producto que la fila anterior. |
+| Las entradas v1 no pueden atarse a un host | A-1 | No hay forma de sellar retroactivamente. Los verificadores lo dicen como WARN nombrando exactamente qué quedó fuera de alcance, nunca como PASS silencioso. |
+
 ## Recomendaciones (fuera del alcance de este cambio — solo registro)
 
 1. **A-1:** incluir `host` (y el `case_id` de la window) en el payload sellado de
