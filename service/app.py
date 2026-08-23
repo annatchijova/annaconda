@@ -251,6 +251,9 @@ def health() -> dict:
         # Whether a tasking must present a verified identity, or may assert its
         # department. The demo asserts; the record always says which.
         "requires_authenticated_principal": principal_mod.require_authenticated(),
+        # What an unauthenticated caller is treated as. Stated, because it is a
+        # posture: on this demo it is the department cleared for every agent.
+        "unauthenticated_default_department": principal_mod.default_department(),
         "tracing": tracing_mode(),
         "narrators": {
             "investigator": {
@@ -970,8 +973,7 @@ async def sweep(req: Request) -> dict:
 class CycleRequest(BaseModel):
     # The department the fleet runs as. The catalog decides what that department
     # may task: run this as "soc" and the adjudication request is refused.
-    department: str = Field(autonomy.COMMANDER_DEPARTMENT, min_length=1,
-                            max_length=64)
+    department: Optional[str] = Field(None, min_length=1, max_length=64)
     # Work the case now even if the fleet scheduled itself for later. This is
     # for a human asking to see a cycle; the cron never forces.
     force: bool = True
@@ -988,7 +990,7 @@ def _principal_for(request: Request, claimed: Optional[str] = None) -> dict:
     resolved = principal_mod.resolve(
         authorization_header=request.headers.get("authorization"),
         claimed_department=claimed,
-        default_department=autonomy.COMMANDER_DEPARTMENT)
+        default_department=principal_mod.default_department())
     try:
         return principal_mod.enforce(resolved)
     except principal_mod.UnauthenticatedPrincipalError as exc:

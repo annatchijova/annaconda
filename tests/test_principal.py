@@ -62,17 +62,32 @@ def test_a_verified_identity_wins_over_what_the_request_claims(monkeypatch):
     assert p["identity"] == "analyst@example.com"
 
 
-def test_a_verified_identity_that_is_not_rostered_gets_nothing(monkeypatch):
-    """Not an anonymous caller, and not granted what it asked for either."""
+def test_a_verified_identity_that_is_not_rostered_is_treated_as_asserted(
+        monkeypatch):
+    """Not authenticated — and not worse off than sending no token at all.
+
+    This test used to assert the opposite: that such a principal was refused.
+    That made a real, verified credential the ONLY input this service rejected,
+    while the same caller dropping the Authorization header was allowed as
+    whatever department it claimed (red-team A-5). The refusal protected
+    nothing and punished honesty. What must hold is that authenticating never
+    leaves a caller worse off, that the claim is still unverified, and that the
+    identity we did verify is recorded — which is strictly more than anonymity
+    gives us.
+    """
     monkeypatch.setenv(pr.ROSTER_ENV, "someone@example.com:soc")
     monkeypatch.setattr(pr, "verify_identity_token",
                         lambda token: "stranger@example.com")
     p = pr.resolve(authorization_header="Bearer x", claimed_department="forensics")
-    assert p["department"] is None
+    anonymous = pr.resolve(authorization_header=None,
+                           claimed_department="forensics")
+    assert p["department"] == anonymous["department"] == "forensics"
     assert p["authenticated"] is False
     assert p["identity"] == "stranger@example.com"
+    pr.enforce(p)   # allowed exactly as far as an anonymous caller is
+    monkeypatch.setenv(pr.REQUIRE_AUTH_ENV, "true")
     with pytest.raises(pr.UnauthenticatedPrincipalError):
-        pr.enforce(p)
+        pr.enforce(p)   # and refused with the rest under the production posture
 
 
 def test_a_roster_entry_naming_an_unknown_department_is_ignored(monkeypatch):

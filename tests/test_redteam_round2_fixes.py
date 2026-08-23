@@ -310,3 +310,74 @@ def test_a9_a_published_department_still_runs_a_cycle():
         session, case, department="incident-response", trigger="t", force=True))
     assert result["acted"]
     assert case["mission"]["journal"]
+
+
+# --- A-5: authenticating must never leave a caller worse off ---------------
+
+def _resolve(monkeypatch, email, claimed=None):
+    from agent import principal as P
+    monkeypatch.setattr(P, "verify_identity_token", lambda tok: email)
+    return P.resolve(authorization_header="Bearer t" if email else None,
+                     claimed_department=claimed,
+                     default_department=P.default_department())
+
+
+def test_a5_a_verified_identity_outside_the_roster_is_not_worse_off_than_anonymous(
+        monkeypatch):
+    """The confirmed inversion: a real, verified token that this deployment has
+    not rostered was the ONLY input that got a 403, while dropping the header
+    entirely was allowed. An attacker holding such a token simply deleted it."""
+    from agent import principal as P
+    monkeypatch.setenv("VIGIA_DEPARTMENT_ROSTER", "alice@example.com:forensics")
+    anonymous = _resolve(monkeypatch, None, claimed="soc")
+    verified = _resolve(monkeypatch, "mallory@evil.com", claimed="soc")
+    P.enforce(anonymous)          # must not raise
+    P.enforce(verified)           # must not raise either
+    assert verified["department"] == anonymous["department"]
+    assert verified["authenticated"] is False
+    assert verified["identity"] == "mallory@evil.com", (
+        "the identity we verified must still be recorded — it is strictly more "
+        "than an anonymous caller gives us")
+
+
+def test_a5_a_rostered_identity_still_wins_over_what_the_request_claims(
+        monkeypatch):
+    monkeypatch.setenv("VIGIA_DEPARTMENT_ROSTER", "alice@example.com:forensics")
+    resolved = _resolve(monkeypatch, "alice@example.com", claimed="soc")
+    assert resolved["department"] == "forensics"
+    assert resolved["authenticated"] is True
+
+
+def test_a5_an_unknown_claimed_department_never_becomes_the_principal(monkeypatch):
+    """It used to be lowercased and carried straight through — into the sealed
+    mission journal as the department that ran the cycle."""
+    from agent import principal as P
+    resolved = _resolve(monkeypatch, None, claimed="; DROP TABLE --")
+    assert resolved["department"] is None
+    with pytest.raises(P.UnauthenticatedPrincipalError):
+        P.enforce(resolved)
+
+
+def test_a5_the_unauthenticated_default_department_is_explicit(monkeypatch):
+    """The default an anonymous caller is treated as must be a stated posture,
+    not an accident of which constant was in scope."""
+    from agent import principal as P
+    monkeypatch.setenv("VIGIA_DEFAULT_DEPARTMENT", "soc")
+    assert P.default_department() == "soc"
+    monkeypatch.setenv("VIGIA_DEFAULT_DEPARTMENT", "not-a-department")
+    assert P.default_department() is None, (
+        "an unusable configured default must refuse, not silently fall back to "
+        "a privileged one")
+
+
+def test_a5_requiring_authentication_still_refuses_an_asserted_principal(
+        monkeypatch):
+    """Negative control: the production posture must be unchanged."""
+    from agent import principal as P
+    monkeypatch.setenv("VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL", "true")
+    monkeypatch.setenv("VIGIA_DEPARTMENT_ROSTER", "alice@example.com:forensics")
+    with pytest.raises(P.UnauthenticatedPrincipalError):
+        P.enforce(_resolve(monkeypatch, None, claimed="forensics"))
+    with pytest.raises(P.UnauthenticatedPrincipalError):
+        P.enforce(_resolve(monkeypatch, "mallory@evil.com", claimed="forensics"))
+    P.enforce(_resolve(monkeypatch, "alice@example.com"))
