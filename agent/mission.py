@@ -486,6 +486,30 @@ def escalation_covers_verdict(mission: dict, entry_hash: str) -> bool:
     return False
 
 
+def has_open_escalation_for_state(mission: dict, prefix: str) -> bool:
+    """Whether an UNACKNOWLEDGED escalation already rests on a verdict of this
+    kind.
+
+    Deliberately coarser than ``escalation_covers_verdict``, and for a different
+    question. A malicious verdict is a specific fact that must be reported once
+    per verdict. An unresolved one is a standing condition — "this host cannot
+    be concluded on" — so what matters is whether a person is already looking at
+    that gap. Once somebody acknowledges it and the gap persists, the next
+    report is warranted, not noise.
+
+    Per-KIND, never per-case: an open malice escalation must not suppress an
+    abstain one, which is the shape of the bug that made the engine's guarantee
+    suppressible in the first place (red-team A-2).
+    """
+    for entry in mission.get("escalations") or []:
+        if entry.get("acknowledged"):
+            continue
+        for basis in entry.get("sealed_basis") or []:
+            if str(basis.get("verdict_state", "")).startswith(prefix):
+                return True
+    return False
+
+
 def _current_escalation(mission: dict) -> Optional[dict]:
     """What a human should be shown: the most severe escalation nobody has
     acknowledged yet, most recent breaking ties. Only when every escalation has

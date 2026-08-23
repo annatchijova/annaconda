@@ -120,6 +120,19 @@ def sealed_verdicts(session: PurpleTeamSession) -> list:
 # fleet may choose any interval up to this on such a case; it may not park it.
 COMPROMISED_MAX_INTERVAL_H = 2
 
+# The same discipline for a host the engine could not conclude on. ABSTAIN was
+# the only state with no exit (red-team A-4): MALICE escalated at once, BENIGN
+# stood down after three cycles, and ABSTAIN looped forever — no escalation, no
+# interval ceiling, and stand_down permitted, so a host whose analyzers were
+# disabled could be parked for a month or closed outright. "We could not tell"
+# is a finding about our visibility, not a quiet host.
+UNRESOLVED_MAX_INTERVAL_H = 12
+
+# After this many cycles still unable to conclude, a person decides whether to
+# collect differently or accept the gap. The fleet does not get to keep trying
+# forever without saying so.
+ABSTAIN_ESCALATION_CYCLES = 3
+
 
 def is_compromised(session: PurpleTeamSession, case: dict) -> bool:
     """Whether the SEALED record says this host is compromised.
@@ -133,6 +146,29 @@ def is_compromised(session: PurpleTeamSession, case: dict) -> bool:
         return True
     return any(v.get("verdict_state", "").startswith("MALICE")
                for v in sealed_verdicts(session))
+
+
+def is_unresolved(session: PurpleTeamSession, case: dict) -> bool:
+    """Whether the SEALED record says this host could not be concluded on.
+
+    Read only from adjudicated sources, exactly like ``is_compromised``: the
+    case's worst verdict and what this session sealed. Never from mission
+    memory, which the agent writes.
+    """
+    if any(v.get("verdict_state", "").startswith("ABSTAIN")
+           for v in sealed_verdicts(session)):
+        return True
+    # The case's own record of a gap that is still open. Deliberately not
+    # `worst_verdict.startswith("ABSTAIN")`: worst_verdict is the worst EVER
+    # seen, so testing it would trap a case that genuinely re-collected and
+    # concluded — one absorbing state traded for another. The open question is
+    # the live signal, and the case store resolves it when a later run
+    # concludes.
+    question = (case or {}).get("open_question")
+    if isinstance(question, dict) and question.get("state") and not question.get(
+            "resolved"):
+        return True
+    return False
 
 
 def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
@@ -258,8 +294,19 @@ def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
         """Set when this case should be worked again and what to do then.
         ``in_hours`` is 1 to 720. The sweep will not touch this case before
         then — this is how the fleet paces itself across weeks."""
-        if (isinstance(in_hours, int) and not isinstance(in_hours, bool)
-                and in_hours > COMPROMISED_MAX_INTERVAL_H
+        bounded = isinstance(in_hours, int) and not isinstance(in_hours, bool)
+        if (bounded and in_hours > UNRESOLVED_MAX_INTERVAL_H
+                and not is_compromised(session, case)
+                and is_unresolved(session, case)):
+            _note(COMMANDER_NAME, "schedule_refused",
+                  detail=f"{in_hours}h on a host the engine could not conclude "
+                         f"on")
+            return {"error": f"this host's sealed record is unresolved (the "
+                             f"engine could not conclude), so it cannot be "
+                             f"scheduled more than "
+                             f"{UNRESOLVED_MAX_INTERVAL_H}h out; choose a "
+                             f"shorter interval or collect what is missing"}
+        if (bounded and in_hours > COMPROMISED_MAX_INTERVAL_H
                 and is_compromised(session, case)):
             # Structural, not advisory. The instruction asks the commander to
             # weigh the sealed record; this makes parking a host the engine
@@ -313,6 +360,16 @@ def commander_tools(session: PurpleTeamSession, case: dict, mission: dict,
             return {"error": "this host's sealed record is malicious — the "
                              "fleet does not stop watching it. Escalate to a "
                              "human instead, and schedule a short interval."}
+        if is_unresolved(session, case):
+            # Standing down here would turn "we could not observe it" into "it
+            # was not there" — the case stops being due forever, and the last
+            # thing its record says is that the engine could not conclude.
+            _note(COMMANDER_NAME, "stand_down_refused",
+                  detail="the sealed record of this host is unresolved")
+            return {"error": "this host's sealed record is unresolved — the "
+                             "engine could not conclude, which is a gap in what "
+                             "we saw, not a clean bill of health. Collect what "
+                             "is missing, or escalate so a person decides."}
         try:
             sd = mem.stand_down(mission, actor=COMMANDER_NAME, rationale=rationale)
         except mem.MissionError as exc:
@@ -501,6 +558,50 @@ def raise_unescalated_malice(session: PurpleTeamSession, mission: dict,
     return uncovered
 
 
+def raise_unresolved_abstain(session: PurpleTeamSession, case: dict,
+                             mission: dict, events: list) -> list:
+    """After enough cycles that could not conclude, a person decides.
+
+    ABSTAIN is the engine being honest about what it could not see, and it was
+    the one state with no route to a human (red-team A-4): a host sealing
+    ABSTAIN_* every cycle looped indefinitely, raising nothing. Left alone that
+    is how "we did not observe X" quietly becomes "X was not there" — the case
+    ages, the queue shows it, and nobody is ever asked to decide whether the
+    gap can be closed or must be accepted.
+
+    Raised from the sealed record, with the basis attached mechanically, like
+    every other escalation the engine makes. Not raised again while a person
+    still has an unhandled report of the same gap in front of them.
+    """
+    if mission.get("cycles", 0) < ABSTAIN_ESCALATION_CYCLES:
+        return []
+    if not is_unresolved(session, case):
+        return []
+    if mem.has_open_escalation_for_state(mission, "ABSTAIN"):
+        return []
+    abstained = [v for v in sealed_verdicts(session)
+                 if v.get("verdict_state", "").startswith("ABSTAIN")]
+    if not abstained:
+        return []
+    states = ", ".join(sorted({v["verdict_state"] for v in abstained}))
+    mem.escalate(
+        mission, actor="engine",
+        why=f"the sealed engine has been unable to conclude on this host for "
+            f"{mission['cycles']} cycles (latest: {states}) — this is a gap in "
+            f"what was collected, not a quiet host",
+        what_to_check="decide whether the missing evidence can be collected "
+                      "another way, or whether this gap is accepted and "
+                      "recorded as such",
+        sealed_basis=abstained)
+    events.append({"role": "engine", "action": "escalate_to_human",
+                   "why": f"{mission['cycles']} cycles sealed {states}; the "
+                          f"engine still cannot conclude",
+                   "what_to_check": "close the collection gap or accept it",
+                   "unsupported_by_seal": False,
+                   "unsealed_verdict_claims": []})
+    return abstained
+
+
 async def run_cycle(session: PurpleTeamSession, case: dict, *,
                     department: str = COMMANDER_DEPARTMENT,
                     trigger: str = "scheduler",
@@ -574,6 +675,7 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
         compromised = is_compromised(session, case)
 
         raise_unescalated_malice(session, mission, events)
+        raise_unresolved_abstain(session, case, mission, events)
 
         # A cycle that ended with no decision about the case's future would
         # strand it: the sweep would revisit it every tick forever. Close that
@@ -585,7 +687,9 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
         # full Gemini cycle on that case, for as long as it existed.
         if (not mission.get("standing_down")
                 and (mission.get("next_action") is None or mem.is_due(mission))):
-            default_hours = COMPROMISED_MAX_INTERVAL_H if compromised else 24
+            default_hours = (COMPROMISED_MAX_INTERVAL_H if compromised else
+                             UNRESOLVED_MAX_INTERVAL_H
+                             if is_unresolved(session, case) else 24)
             mem.schedule_next_action(
                 mission, actor=COMMANDER_NAME,
                 action="re-assess this case",

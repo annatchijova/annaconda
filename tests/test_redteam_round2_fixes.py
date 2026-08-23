@@ -381,3 +381,153 @@ def test_a5_requiring_authentication_still_refuses_an_asserted_principal(
     with pytest.raises(P.UnauthenticatedPrincipalError):
         P.enforce(_resolve(monkeypatch, "mallory@evil.com", claimed="forensics"))
     P.enforce(_resolve(monkeypatch, "alice@example.com"))
+
+
+# --- A-4 / A-6: ABSTAIN must have an exit toward a human -------------------
+
+ABSTAIN_FIX = Path(__file__).parent / "fixtures" / "abstain"
+
+
+def _abstain_case(case_id="A4"):
+    from agent import mission as mem
+    session = PurpleTeamSession(
+        MockTransport(ABSTAIN_FIX), case_id=case_id,
+        host={"client_id": "C.a", "hostname": "WIN11-VICTIM", "os": "windows"},
+        examiner_id="p", out_dir=Path(mkdtemp()), source="replay",
+        time_base="2026-08-12T14:00:00Z")
+    case = {"case_id": case_id, "examiner_id": "p", "entries": [],
+            "verdicts": [], "audit_trail": [], "runs": 0, "worst_verdict": None,
+            "status": "open", "host": session.host,
+            "mission": mem.new_mission(case_id)}
+    return session, case
+
+
+def test_a4_a_host_that_cannot_be_concluded_eventually_reaches_a_human():
+    """The confirmed vector: eight cycles sealing ABSTAIN_* raised zero
+    escalations. "We could not tell" had no path to a person at all."""
+    import asyncio
+    from agent import autonomy, mission as mem
+    from service.case_store import MemoryCaseStore
+
+    store = MemoryCaseStore()
+    session, seed = _abstain_case("A4-LOOP")
+    store.create_case("A4-LOOP", seed["host"], "p", scenario="abstain")
+    for _ in range(autonomy.ABSTAIN_ESCALATION_CYCLES + 1):
+        case = store.get_case("A4-LOOP")
+        s, _ = _abstain_case("A4-LOOP")
+        s._seq = len(case.get("entries", []))
+        s._prev_entry_hash = (case["entries"][-1]["entry_hash"]
+                              if case.get("entries") else s._prev_entry_hash)
+        result = asyncio.run(autonomy.run_cycle(s, case, trigger="t", force=True))
+        store.apply_cycle("A4-LOOP", list(s._entries), result["verdicts"],
+                          s.audit_trail, case["mission"])
+    mission = store.get_case("A4-LOOP")["mission"]
+    assert mem.has_open_escalation(mission), (
+        "a host the engine has been unable to conclude on for "
+        f"{autonomy.ABSTAIN_ESCALATION_CYCLES} cycles never reached a human")
+    basis = [b for e in mission["escalations"] for b in e["sealed_basis"]]
+    assert any(b["verdict_state"].startswith("ABSTAIN") for b in basis)
+
+
+def test_a4_an_unresolved_case_cannot_be_stood_down():
+    """stand_down was permitted on a case whose sealed record says the
+    analyzers were disabled and the result is unreliable."""
+    from agent import autonomy
+    session, case = _abstain_case("A4-SD")
+    case["worst_verdict"] = "ABSTAIN_DEGRADED"
+    case["open_question"] = {"state": "ABSTAIN_DEGRADED", "resolved": False,
+                             "why": "critical analyzers were disabled",
+                             "what_would_resolve": "re-run with full integrity"}
+    tools = {t.__name__: t for t in
+             autonomy.commander_tools(session, case, case["mission"])}
+    out = tools["stand_down"]("the host has been quiet")
+    assert "error" in out, out
+    assert case["mission"]["standing_down"] is None
+
+
+def test_a4_an_unresolved_case_cannot_be_parked_for_a_month():
+    from agent import autonomy
+    session, case = _abstain_case("A4-SCH")
+    case["worst_verdict"] = "ABSTAIN_DEGRADED"
+    case["open_question"] = {"state": "ABSTAIN_DEGRADED", "resolved": False,
+                             "why": "critical analyzers were disabled",
+                             "what_would_resolve": "re-run with full integrity"}
+    tools = {t.__name__: t for t in
+             autonomy.commander_tools(session, case, case["mission"])}
+    assert "error" in tools["schedule_next_cycle"]("look again", 720, "quiet")
+    ok = tools["schedule_next_cycle"](
+        "re-collect the surface that could not be read",
+        autonomy.UNRESOLVED_MAX_INTERVAL_H, "still unresolved")
+    assert "error" not in ok, ok
+
+
+def test_a4_a_benign_case_may_still_stand_down_and_take_a_long_interval():
+    """Negative control: the new guard must only bind unresolved cases."""
+    from agent import autonomy
+    session, case = _abstain_case("A4-OK")
+    case["worst_verdict"] = "BENIGN_HIGH"
+    tools = {t.__name__: t for t in
+             autonomy.commander_tools(session, case, case["mission"])}
+    assert "error" not in tools["schedule_next_cycle"]("routine", 24, "quiet")
+    assert "error" not in tools["stand_down"]("three benign cycles, nothing open")
+
+
+def test_a6_a_superseded_abstain_is_never_silent_in_the_queue():
+    """The transition itself is deliberate — an abstain is a fact about a
+    collection, and a later complete one may supersede it (two tests in
+    test_case_store pin that). What the audit found is that it was SILENT:
+    status read 'benign' while worst_verdict still read ABSTAIN_*, and the
+    analyst row showed only the optimistic half.
+
+    Note the remaining, deeper gap, tracked in the report rather than papered
+    over: the transition fires on any later conclusive verdict, including one
+    from a different surface than the abstain said was missing.
+    """
+    from service.case_store import _apply_run, _summarize
+    from agent.mission import new_mission
+    case = {"case_id": "A6", "entries": [], "verdicts": [], "audit_trail": [],
+            "runs": 0, "worst_verdict": None, "status": "open",
+            "open_question": None, "mission": new_mission("A6")}
+    _apply_run(case, [], [{"verdict_state": "ABSTAIN_INSUFFICIENT"}], [])
+    assert case["status"] == "abstain"
+    _apply_run(case, [], [{"verdict_state": "BENIGN_HIGH"}], [])
+    assert case["worst_verdict"] == "ABSTAIN_INSUFFICIENT"
+    row = _summarize(dict(case, host={}, examiner_id="x", created_utc="",
+                          updated_utc=""))
+    assert row["supersedes_unresolved"] is True, (
+        "a row whose status and worst_verdict disagree must say so")
+
+
+def test_a6_an_open_gap_still_blocks_the_planner_from_treating_it_as_quiet():
+    """The dangerous consequence of the divergence, closed: while the gap is
+    open the fleet may not park or close the case, whatever status reads."""
+    from agent import autonomy
+    session, case = _abstain_case("A6C")
+    case["status"] = "benign"          # the optimistic reading
+    case["worst_verdict"] = "ABSTAIN_INSUFFICIENT"
+    case["open_question"] = {"state": "ABSTAIN_INSUFFICIENT", "resolved": False,
+                             "why": "incomplete collection",
+                             "what_would_resolve": "collect both surfaces"}
+    assert autonomy.is_unresolved(session, case)
+    tools = {t.__name__: t for t in
+             autonomy.commander_tools(session, case, case["mission"])}
+    assert "error" in tools["stand_down"]("looks clean now")
+    # ...and once the gap is genuinely closed, the case is free again
+    case["open_question"]["resolved"] = True
+    session2, _ = _abstain_case("A6D")
+    assert not autonomy.is_unresolved(session2, case)
+
+
+def test_a6_a_conclusive_case_still_settles():
+    """Negative control: a case whose worst verdict IS benign still reads
+    benign, and a malicious one still reads malice."""
+    from service.case_store import _apply_run
+    from agent.mission import new_mission
+    for states, expected in ((["BENIGN_HIGH"], "benign"),
+                             (["MALICE_HIGH"], "malice")):
+        case = {"case_id": "A6B", "entries": [], "verdicts": [],
+                "audit_trail": [], "runs": 0, "worst_verdict": None,
+                "status": "open", "open_question": None,
+                "mission": new_mission("A6B")}
+        _apply_run(case, [], [{"verdict_state": s} for s in states], [])
+        assert case["status"] == expected
