@@ -52,5 +52,15 @@ print("POST /cases/E8B/cycle {'department':'soc'} ->", r.status_code)
 print("   catalog refusals               :", [e["detail"][:70] for e in refusals])
 print("   sealed verdicts this cycle     :", [v["verdict_state"] for v in r.json()["cycle"]["verdicts"]])
 print()
-print("=> the SAME sealed-core effect the catalog denies to 'soc' at /cycle")
-print("   is unconditional and unauthenticated at /cases/{id}/investigate.")
+print("At 3f2c19c this route took no department and called no gate at all.")
+print("Now the catalog is asked at the HTTP boundary too (A-3 fix):")
+for dept in ("soc", "training", "; DROP TABLE --", "incident-response"):
+    c.post("/cases", json={"case_id": f"E8-{abs(hash(dept))%9999}",
+                           "examiner_id": "anon", "scenario": "attack"})
+    r = c.post("/cases/E8/investigate",
+               json={"mode": "scripted", "scenario": "attack", "department": dept})
+    print(f"   department={dept!r:<22} -> {r.status_code}"
+          f"{'  ' + r.json().get('detail','')[:60] if r.status_code != 200 else ''}")
+print()
+print("Remaining, tracked as A-5: an anonymous caller still defaults to")
+print("'incident-response', the department cleared for every agent.")

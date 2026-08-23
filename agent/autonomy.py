@@ -512,6 +512,16 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
     due is skipped without opening a cycle — that is the point of the fleet
     pacing itself: most wake-ups on most cases should do nothing.
     """
+    # The delegator itself is a tasking. Until this check existed, the catalog
+    # authorized what the commander DELEGATED and never the commander
+    # (red-team A-9), so a department the fleet-commander is not published to —
+    # 'training', 'compliance' — opened cycles and wrote the case's memory, a
+    # data class it holds no clearance for. Checked before the due test, so a
+    # refused department cannot even learn whether a case is due.
+    catalog.authorize(COMMANDER_NAME, department=department,
+                      data_classes=catalog.publication(
+                          COMMANDER_NAME)["data_classes"])
+
     mission = mem.attach(case)
     if not force and not mem.is_due(mission):
         return {"acted": False, "reason": "not due", "case_id": case["case_id"],

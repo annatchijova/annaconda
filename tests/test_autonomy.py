@@ -129,9 +129,21 @@ def test_incident_response_is_cleared_for_the_whole_loop():
 
 
 def test_an_unknown_department_cannot_run_the_fleet():
+    """Refused outright, not merely left with nothing to collect.
+
+    This used to assert only that no collection happened: the cycle still
+    opened, still wrote the case's memory, and only the delegated taskings were
+    refused, because the catalog gated the delegates and never the delegator
+    (red-team A-9). The commander is now authorized first, so an unpublished
+    department never reaches the case at all.
+    """
+    import pytest
+    from agent import catalog
     case = _case()
-    result = _cycle(_session(), case, department="marketing")
-    assert all(e["action"] != "collect" for e in result["fleet_log"])
+    with pytest.raises(catalog.NotPublishedError):
+        _cycle(_session(), case, department="marketing")
+    assert "mission" not in case, (
+        "a refused tasking must not have reached the case's memory at all")
 
 
 def test_the_cycles_memory_is_tamper_evident():

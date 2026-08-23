@@ -150,6 +150,10 @@ def _new_session(case_id: str, examiner_id: str,
 class InvestigateRequest(BaseModel):
     case_id: str = Field(..., pattern=r"^[A-Za-z0-9._-]{1,128}$")
     examiner_id: str = Field(..., min_length=1, max_length=128)
+    # The department this investigation runs as. The catalog decides whether it
+    # may reach the sealed core at all (red-team A-3): adjudication belongs to
+    # forensics and incident response, and this route used to skip the check.
+    department: Optional[str] = Field(None, min_length=1, max_length=64)
     mode: str = Field("scripted", pattern=r"^(scripted|agent)$")
     scenario: str = Field("benign", pattern=r"^(benign|attack)$")
     # scripted mode: list of hunt groups, one sealed window per group.
@@ -337,7 +341,11 @@ async def _run_agent(session: PurpleTeamSession, prompt: str) -> dict:
 
 
 @app.post("/investigate")
-async def investigate(req: InvestigateRequest) -> dict:
+async def investigate(req: InvestigateRequest, request: Request) -> dict:
+    # This route reaches the sealed core; the catalog decides whether the
+    # department behind it may (red-team A-3).
+    _authorize(request, INVESTIGATOR_AGENT, claimed=req.department,
+               data_classes=INVESTIGATOR_DATA_CLASSES)
     session = _new_session(req.case_id, req.examiner_id, scenario=req.scenario)
 
     if req.mode == "scripted":
@@ -399,6 +407,7 @@ class CaseCreateRequest(BaseModel):
 
 class CaseInvestigateRequest(BaseModel):
     mode: str = Field("scripted", pattern=r"^(scripted|agent)$")
+    department: Optional[str] = Field(None, min_length=1, max_length=64)
     scenario: str = Field("benign", pattern=r"^(benign|attack|insufficient)$")
     hunt_groups: Optional[list[list[str]]] = None
     prompt: Optional[str] = None
@@ -560,10 +569,13 @@ def get_case_exhibit(case_id: str) -> dict:
 
 
 @app.post("/cases/{case_id}/investigate")
-async def investigate_case(case_id: str, req: CaseInvestigateRequest) -> dict:
+async def investigate_case(case_id: str, req: CaseInvestigateRequest,
+                           request: Request) -> dict:
     case = _CASE_STORE.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
+    _authorize(request, INVESTIGATOR_AGENT, claimed=req.department,
+               data_classes=INVESTIGATOR_DATA_CLASSES)
 
     session = _session_for_case(case, req.scenario)
     if req.mode == "scripted":
@@ -668,17 +680,26 @@ def _naive_narrate(evidence_text: str) -> str:
 
 class FleetRequest(BaseModel):
     scenario: str = Field("attack", pattern=r"^(benign|attack|insufficient)$")
+    department: Optional[str] = Field(None, min_length=1, max_length=64)
 
 
 @app.post("/fleet-investigate")
-def fleet_investigate(req: FleetRequest) -> dict:
+def fleet_investigate(req: FleetRequest, request: Request) -> dict:
     """Run the specialized fleet over a case: a dispatcher routes collection to
     per-domain hunters (disjoint tool contracts), and the correlator — the only
     role that can reach the sealed core — adjudicates and verifies. Deterministic
     orchestration, so it is reliable on camera."""
     from agent.fleet import FLEET, contract_names, dispatch_investigation
+    principal = _principal_for(request, req.department)
     session = _new_session("FLEET-DEMO", "perito-01", scenario=req.scenario)
-    report = dispatch_investigation(session)
+    try:
+        # Every specialist the dispatch will drive is authorized for this
+        # department first — the fleet is a composition of tool contracts, and
+        # each one is a tasking the catalog has an opinion about (red-team A-3).
+        report = dispatch_investigation(session,
+                                        department=principal["department"])
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     report["contracts"] = contract_names(session)
     report["roles"] = {name: spec["role"] for name, spec in FLEET.items()}
     flush_tracing()  # export the reasoning-chain spans before returning
@@ -686,7 +707,7 @@ def fleet_investigate(req: FleetRequest) -> dict:
 
 
 @app.post("/injection-demo")
-def injection_demo() -> dict:
+def injection_demo(request: Request) -> dict:
     """Show the genuine threat of putting an LLM in DFIR: the attacker writes the
     evidence. A naive narrator that trusts the evidence gets baited into calling
     a compromised host benign — but annaconda's sealed verdict, produced before
@@ -700,6 +721,8 @@ def injection_demo() -> dict:
                             detail="rate limited — this demo calls paid models; "
                                    "try again in a few seconds")
 
+    _authorize(request, INVESTIGATOR_AGENT, claimed=None,
+               data_classes=INVESTIGATOR_DATA_CLASSES)
     session = _new_session("INJECTION-DEMO", "perito-01", scenario="injection")
     summary = session.run_hunt(["pslist", "netstat"], reason="attacker-controlled evidence")
     window = session._windows[summary["window_id"]]
@@ -970,6 +993,39 @@ def _principal_for(request: Request, claimed: Optional[str] = None) -> dict:
         return principal_mod.enforce(resolved)
     except principal_mod.UnauthenticatedPrincipalError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+def _authorize(request: Request, agent_name: str, *, claimed: Optional[str],
+               data_classes) -> dict:
+    """Resolve who is asking and ask the catalog whether they may.
+
+    Until this existed, ``catalog.authorize`` was called from exactly two places,
+    both inside ``agent/autonomy.commander_tools`` — so the catalog gated the
+    agentic path and merely *described* the four HTTP routes that reach
+    ``session.adjudicate()`` (red-team A-3). The same sealed-core effect the
+    catalog refused to 'soc' at /cases/{id}/cycle was unconditional and
+    unauthenticated here.
+
+    A gate has to sit where the contract is exercised, so it sits here now, on
+    every route that drives an agent's tools. The principal resolves exactly as
+    it does for a cycle: a verified identity wins, an asserted department is
+    allowed by default and recorded as asserted.
+    """
+    principal = _principal_for(request, claimed)
+    try:
+        catalog.authorize(agent_name, department=principal["department"],
+                          data_classes=data_classes)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return principal
+
+
+# The single-operator investigator's catalog identity: /investigate and
+# /cases/{id}/investigate both drive exactly this tool contract, scripted or
+# agent-driven, so both are authorized as it.
+INVESTIGATOR_AGENT = "vigia_purple_team"
+INVESTIGATOR_DATA_CLASSES = ["endpoint_telemetry", "persistence_artifacts",
+                             "sealed_verdicts"]
 
 
 @app.post("/cases/{case_id}/cycle")

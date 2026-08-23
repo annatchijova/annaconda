@@ -222,3 +222,91 @@ class _MockSession:
     def __init__(self, verdicts):
         self.audit_trail = [{"seq": i, "action": "adjudicate", "detail": v}
                             for i, v in enumerate(verdicts)]
+
+
+# --- A-3 / A-9: the catalog must gate every path to the sealed core ---------
+
+@pytest.fixture()
+def client(monkeypatch):
+    monkeypatch.setenv("VIGIA_CASE_BACKEND", "memory")
+    monkeypatch.setenv("VIGIA_RATE_MAX", "500")
+    from fastapi.testclient import TestClient
+    import importlib
+    import service.app as app_mod
+    importlib.reload(app_mod)
+    return TestClient(app_mod.app)
+
+
+def test_a3_a_department_that_may_not_adjudicate_is_refused_at_investigate(client):
+    """The confirmed vector: the catalog denies 'soc' the correlator on the
+    agentic path, while /cases/{id}/investigate reached the sealed core
+    unconditionally."""
+    client.post("/cases", json={"case_id": "A3", "examiner_id": "x",
+                                "scenario": "attack"})
+    r = client.post("/cases/A3/investigate",
+                    json={"mode": "scripted", "scenario": "attack",
+                          "department": "soc"})
+    assert r.status_code == 403, r.text
+    assert "soc" in r.text
+
+
+def test_a3_a_department_that_may_adjudicate_still_works(client):
+    """Negative control: the gate must not break the honest path."""
+    client.post("/cases", json={"case_id": "A3B", "examiner_id": "x",
+                                "scenario": "attack"})
+    r = client.post("/cases/A3B/investigate",
+                    json={"mode": "scripted", "scenario": "attack",
+                          "department": "incident-response"})
+    assert r.status_code == 200, r.text
+    assert r.json()["run_verdicts"][0]["verdict_state"].startswith("MALICE")
+
+
+def test_a3_the_one_off_investigate_route_is_gated_too(client):
+    r = client.post("/investigate",
+                    json={"case_id": "A3C", "examiner_id": "x",
+                          "mode": "scripted", "scenario": "attack",
+                          "department": "training"})
+    assert r.status_code == 403, r.text
+
+
+def test_a3_an_unknown_department_is_refused_not_silently_accepted(client):
+    client.post("/cases", json={"case_id": "A3D", "examiner_id": "x"})
+    r = client.post("/cases/A3D/investigate",
+                    json={"mode": "scripted", "department": "; DROP TABLE --"})
+    assert r.status_code == 403, r.text
+
+
+def test_a9_the_commander_is_authorized_against_the_catalog():
+    """A department the catalog does not publish the fleet-commander to must
+    not be able to run a cycle at all — the delegator was never gated, only
+    its delegates."""
+    import asyncio
+    from agent import autonomy, catalog, mission as mem
+
+    for dept in ("training", "compliance"):
+        assert dept not in catalog.publication("fleet-commander")["available_to"]
+        session = _session(case_id=f"A9-{dept}", scenario="velociraptor")
+        case = {"case_id": f"A9-{dept}", "examiner_id": "p", "entries": [],
+                "verdicts": [], "audit_trail": [], "runs": 0,
+                "worst_verdict": None, "status": "open", "host": session.host,
+                "mission": mem.new_mission(f"A9-{dept}")}
+        with pytest.raises(PermissionError):
+            asyncio.run(autonomy.run_cycle(session, case, department=dept,
+                                           trigger="t", force=True))
+        assert not case["mission"]["journal"], (
+            "a refused tasking must not have opened a cycle or written memory")
+
+
+def test_a9_a_published_department_still_runs_a_cycle():
+    """Negative control."""
+    import asyncio
+    from agent import autonomy, mission as mem
+    session = _session(case_id="A9-OK", scenario="velociraptor")
+    case = {"case_id": "A9-OK", "examiner_id": "p", "entries": [],
+            "verdicts": [], "audit_trail": [], "runs": 0,
+            "worst_verdict": None, "status": "open", "host": session.host,
+            "mission": mem.new_mission("A9-OK")}
+    result = asyncio.run(autonomy.run_cycle(
+        session, case, department="incident-response", trigger="t", force=True))
+    assert result["acted"]
+    assert case["mission"]["journal"]
