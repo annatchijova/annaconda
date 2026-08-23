@@ -1094,13 +1094,21 @@ class AcknowledgeRequest(BaseModel):
 
 
 @app.post("/cases/{case_id}/escalations/{index}/acknowledge")
-def acknowledge_escalation(case_id: str, index: int, req: AcknowledgeRequest,
+def acknowledge_escalation(case_id: str, index: str, req: AcknowledgeRequest,
                            request: Request) -> dict:
     """A human takes up one escalation, saying what they did.
 
     This is the other half of escalation: an escalation stops being shown
     because somebody handled it, never because something newer arrived. When
     this one is acknowledged the next unacknowledged one surfaces.
+
+    ``index`` is the escalation's stable id ("E3") or, still supported, its
+    position. Prefer the id: the list is capped, so a position a caller read a
+    moment ago can point at a different escalation by the time it is used, and
+    taking up the wrong one silences an escalation nobody handled. The mission
+    layer has always accepted both — this route typed the parameter ``int``,
+    which made the id branch unreachable and left acknowledging positional-only
+    (red-team A-7).
     """
     case = _CASE_STORE.get_case(case_id)
     if case is None:

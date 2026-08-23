@@ -531,3 +531,161 @@ def test_a6_a_conclusive_case_still_settles():
                 "mission": new_mission("A6B")}
         _apply_run(case, [], [{"verdict_state": s} for s in states], [])
         assert case["status"] == expected
+
+
+# --- A-7: acknowledging must target the escalation the human read ----------
+
+def _malice_escalation(mission, why="the sealed engine adjudicated MALICE_HIGH"):
+    from agent import mission as mem
+    return mem.escalate(mission, actor="engine", why=why,
+                        what_to_check="confirm containment",
+                        sealed_basis=[{"verdict_state": "MALICE_HIGH",
+                                       "entry_hash": "a" * 64, "sequence": 0}])
+
+
+def test_a7_the_stable_escalation_id_is_reachable_over_http(client):
+    """The fix existed in mission.py and the route made it dead code: the path
+    parameter was typed int, so a stable id was rejected with 422 and
+    acknowledging was positional-only — the exact hazard the code's own comment
+    says it closed."""
+    from agent import mission as mem
+    client.post("/cases", json={"case_id": "A7", "examiner_id": "p"})
+    import service.app as app_mod
+    case = app_mod._CASE_STORE.get_case("A7")
+    mission = mem.attach(case)
+    entry = _malice_escalation(mission)
+    r = client.post(f"/cases/A7/escalations/{entry['id']}/acknowledge",
+                    json={"note": "handled", "examiner_id": "alice"})
+    assert r.status_code == 200, r.text
+    assert r.json()["acknowledged"]["id"] == entry["id"]
+
+
+def test_a7_a_positional_index_still_works(client):
+    """Negative control: existing callers passing a position keep working."""
+    from agent import mission as mem
+    client.post("/cases", json={"case_id": "A7B", "examiner_id": "p"})
+    import service.app as app_mod
+    mission = mem.attach(app_mod._CASE_STORE.get_case("A7B"))
+    _malice_escalation(mission)
+    r = client.post("/cases/A7B/escalations/0/acknowledge",
+                    json={"note": "handled", "examiner_id": "alice"})
+    assert r.status_code == 200, r.text
+
+
+def test_a7_trimming_gives_up_routine_escalations_before_a_malicious_one():
+    """The confirmed vector: _trim evicted by age alone, so an unacknowledged
+    escalation resting on a sealed MALICE verdict was dropped before newer
+    routine notes — and escalate_to_human has no per-cycle limit."""
+    from agent import mission as mem
+    mission = mem.new_mission("A7C")
+    engine = _malice_escalation(mission)
+    for i in range(mem.ESCALATION_LIMIT + 20):
+        mem.escalate(mission, actor="fleet-commander", why=f"routine note {i}",
+                     what_to_check="nothing specific")
+    ids = [e["id"] for e in mission["escalations"]]
+    assert engine["id"] in ids, (
+        "the engine's unacknowledged MALICE escalation was evicted by routine "
+        "notes")
+    assert len(ids) <= mem.ESCALATION_LIMIT
+    shown = mission["escalation"]
+    assert any(b["verdict_state"].startswith("MALICE")
+               for b in shown["sealed_basis"]), (
+        "the most severe unhandled escalation must still be what a human sees")
+
+
+def test_a7_acknowledged_escalations_are_given_up_first():
+    """Negative control: the cap must still bound the list, giving up handled
+    history before open work."""
+    from agent import mission as mem
+    mission = mem.new_mission("A7D")
+    for i in range(mem.ESCALATION_LIMIT):
+        mem.escalate(mission, actor="fleet-commander", why=f"handled {i}",
+                     what_to_check="x")
+    for entry in list(mission["escalations"]):
+        mem.acknowledge_escalation(mission, actor="op", index=entry["id"],
+                                   note="done")
+    fresh = _malice_escalation(mission, why="a new sealed MALICE_HIGH")
+    assert len(mission["escalations"]) <= mem.ESCALATION_LIMIT
+    assert fresh["id"] in [e["id"] for e in mission["escalations"]]
+    assert mission["summarized_away"]["escalations"] > 0
+
+
+# --- A-8: verify_mission must cover the state the system actually reads ----
+
+def _worked_mission(case_id="A8"):
+    import asyncio
+    from agent import autonomy, mission as mem
+    session, case = _abstain_case(case_id)
+    asyncio.run(autonomy.run_cycle(session, case, trigger="t", force=True))
+    return case["mission"]
+
+
+def test_a8_an_honest_mission_verifies():
+    """Negative control, first: the check must not cry wolf on real memory."""
+    from agent import mission as mem
+    report = mem.verify_mission(_worked_mission("A8-OK"))
+    assert report["memory_ok"], report["errors"]
+
+
+def test_a8_a_forged_stand_down_is_detected():
+    """The confirmed vector: standing_down is what is_due() reads, and it was
+    covered by no hash at all — forge it and the case is never worked again
+    while verify_mission still reported memory_ok."""
+    from agent import mission as mem
+    mission = _worked_mission("A8-SD")
+    mission["standing_down"] = {"rationale": "nothing further to collect",
+                                "at_cycle": 99, "at_utc": "2026-01-01T00:00:00Z"}
+    mission["next_action"] = None
+    assert not mem.is_due(mission)              # the effect is real
+    report = mem.verify_mission(mission)
+    assert not report["memory_ok"], "a forged stand-down must be detectable"
+    assert any("stand" in e for e in report["errors"]), report["errors"]
+
+
+def test_a8_a_forged_collection_record_is_detected():
+    """tried_hunts decides which surface the planner collects next, so forging
+    it changes what evidence comes to exist."""
+    from agent import mission as mem
+    mission = _worked_mission("A8-TH")
+    mission["tried_hunts"].append({
+        "hunts": ["process_creation_evtx", "scheduled_tasks"],
+        "reason": "already covered", "window_id": "x", "cycle": 1,
+        "collected_utc": "2026-01-01T00:00:00Z"})
+    report = mem.verify_mission(mission)
+    assert not report["memory_ok"], report
+    assert any("tried_hunts" in e for e in report["errors"]), report["errors"]
+
+
+def test_a8_a_silently_acknowledged_escalation_is_detected():
+    """Acknowledging is how a malicious verdict stops demanding attention.
+    Flipping the flag without a journal entry must not pass."""
+    from agent import mission as mem
+    mission = _worked_mission("A8-ACK")
+    entry = _malice_escalation(mission)
+    assert mem.verify_mission(mission)["memory_ok"]
+    entry["acknowledged"] = True
+    report = mem.verify_mission(mission)
+    assert not report["memory_ok"], report
+    assert any("acknowledg" in e for e in report["errors"]), report["errors"]
+
+
+def test_a8_an_honestly_acknowledged_escalation_still_verifies():
+    """Negative control."""
+    from agent import mission as mem
+    mission = _worked_mission("A8-ACK2")
+    entry = _malice_escalation(mission)
+    mem.acknowledge_escalation(mission, actor="op", index=entry["id"],
+                               note="contained")
+    assert mem.verify_mission(mission)["memory_ok"]
+
+
+def test_a8_trimming_the_summary_still_verifies():
+    """Negative control that matters: _trim legitimately drops entries the
+    journal keeps, so the check must be "every summary entry is backed by the
+    journal", never "the summary equals the journal"."""
+    from agent import mission as mem
+    mission = _worked_mission("A8-TRIM")
+    for i in range(mem.HYPOTHESIS_LIMIT + 10):
+        mem.add_hypothesis(mission, actor="c", text=f"line of inquiry {i}")
+    assert mission["summarized_away"]["hypotheses"] > 0
+    assert mem.verify_mission(mission)["memory_ok"], mem.verify_mission(mission)
