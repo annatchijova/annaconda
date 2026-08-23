@@ -458,6 +458,49 @@ def plan_deterministically(session: PurpleTeamSession, case: dict,
             why="no open lead; a quiet host earns a long interval")
 
 
+def raise_unescalated_malice(session: PurpleTeamSession, mission: dict,
+                             events: list) -> list:
+    """A malicious verdict reaches a human because the ENGINE reached it.
+
+    Not because the commander chose to say so: the planner escalates, an agent
+    might not, and a cycle that seals MALICE and tells nobody is the failure
+    this whole system exists to prevent. Raised here, from the sealed record,
+    with the basis attached mechanically — the agent cannot state, inflate or
+    hide it.
+
+    The condition is per-verdict (red-team A-2). Gating on "is any escalation
+    still open" made the guarantee suppressible by call order alone: the
+    commander raising any escalation before adjudicating left one open, the
+    check read "already handled", and the sealed MALICE verdict reached nobody.
+    Every malicious verdict this cycle sealed that no escalation yet cites is
+    escalated; one already cited is not re-raised.
+
+    Returns the verdicts it escalated (empty when there was nothing new to say).
+    """
+    uncovered = [
+        v for v in sealed_verdicts(session)
+        if v.get("verdict_state", "").startswith("MALICE")
+        and not mem.escalation_covers_verdict(mission, v.get("entry_hash"))
+    ]
+    if not uncovered:
+        return []
+    states = ", ".join(sorted({v["verdict_state"] for v in uncovered}))
+    mem.escalate(
+        mission, actor="engine",
+        why=f"the sealed engine adjudicated {states} on this host and the "
+            f"cycle closed without escalating it",
+        what_to_check="confirm containment, then review the sealed chain and "
+                      "the MITRE techniques the engine returned",
+        sealed_basis=uncovered)
+    events.append({"role": "engine", "action": "escalate_to_human",
+                   "why": f"sealed {states}; the cycle closed without "
+                          f"escalating it",
+                   "what_to_check": "confirm containment",
+                   "unsupported_by_seal": False,
+                   "unsealed_verdict_claims": []})
+    return uncovered
+
+
 async def run_cycle(session: PurpleTeamSession, case: dict, *,
                     department: str = COMMANDER_DEPARTMENT,
                     trigger: str = "scheduler",
@@ -520,34 +563,7 @@ async def run_cycle(session: PurpleTeamSession, case: dict, *,
 
         compromised = is_compromised(session, case)
 
-        # A malicious verdict reaches a human because the ENGINE reached it,
-        # not because the commander chose to say so. The planner escalates; an
-        # agent might not, and a cycle that seals MALICE and tells nobody is
-        # the failure this whole system exists to prevent. Raised here, from
-        # the sealed record, with the basis attached mechanically.
-        # Asks whether an escalation is still OPEN, not whether the derived
-        # mission["escalation"] field is populated: that field falls back to the
-        # latest entry once everything is acknowledged, so gating on it meant
-        # that after the first escalation was taken up, a later cycle sealing a
-        # fresh MALICE raised nothing and reached nobody.
-        malice = [v for v in sealed_verdicts(session)
-                  if v.get("verdict_state", "").startswith("MALICE")]
-        if malice and not mem.has_open_escalation(mission):
-            mem.escalate(
-                mission, actor="engine",
-                why=f"the sealed engine adjudicated "
-                    f"{malice[0]['verdict_state']} on this host and the cycle "
-                    f"closed without escalating",
-                what_to_check="confirm containment, then review the sealed "
-                              "chain and the MITRE techniques the engine "
-                              "returned",
-                sealed_basis=malice)
-            events.append({"role": "engine", "action": "escalate_to_human",
-                           "why": f"sealed {malice[0]['verdict_state']}; the "
-                                  f"cycle closed without escalating",
-                           "what_to_check": "confirm containment",
-                           "unsupported_by_seal": False,
-                           "unsealed_verdict_claims": []})
+        raise_unescalated_malice(session, mission, events)
 
         # A cycle that ended with no decision about the case's future would
         # strand it: the sweep would revisit it every tick forever. Close that

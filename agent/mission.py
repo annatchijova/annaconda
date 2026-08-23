@@ -463,6 +463,29 @@ def has_open_escalation(mission: dict) -> bool:
                for e in (mission.get("escalations") or []))
 
 
+def escalation_covers_verdict(mission: dict, entry_hash: str) -> bool:
+    """Whether some escalation already rests on THIS sealed verdict.
+
+    The engine's mandatory escalation used to be gated on "is any escalation
+    still open" (red-team A-2). That made the guarantee suppressible by call
+    order: the commander raising any escalation — a routine note, before it
+    adjudicated anything — left one open, so the engine's check saw "already
+    handled" and a sealed MALICE verdict reached nobody with its basis attached.
+
+    The honest question is per-verdict, not per-case: has anyone been told about
+    *this* entry_hash. Acknowledged escalations count — a human took that verdict
+    up — so a case does not re-raise what was already handled, while a later
+    cycle sealing a FRESH malicious verdict always does.
+    """
+    if not entry_hash:
+        return False
+    for entry in mission.get("escalations") or []:
+        for basis in entry.get("sealed_basis") or []:
+            if basis.get("entry_hash") == entry_hash:
+                return True
+    return False
+
+
 def _current_escalation(mission: dict) -> Optional[dict]:
     """What a human should be shown: the most severe escalation nobody has
     acknowledged yet, most recent breaking ties. Only when every escalation has

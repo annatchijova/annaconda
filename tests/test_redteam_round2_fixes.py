@@ -153,3 +153,72 @@ def test_a1_a_historical_entry_without_a_host_hash_warns_rather_than_passes():
     report = verify_stream([legacy], case_id="CASE-VICTIM-A", host=window["host"])
     assert report["chain_ok"], report["errors"]
     assert report["warnings"], "an unbindable host must produce a warning"
+
+
+# --- A-2: the engine's mandatory escalation is not suppressible by ordering --
+
+def _cycle(order):
+    """One cycle on a host the engine adjudicates MALICE_HIGH, driving the
+    commander's own tools in the given order — every call permitted."""
+    import asyncio
+    from agent import autonomy, mission as mem
+
+    session = _session(case_id="A2", hostname="WIN11-VICTIM")
+    case = {"case_id": "A2", "examiner_id": "p", "entries": [], "verdicts": [],
+            "audit_trail": [], "runs": 0, "worst_verdict": None,
+            "status": "open", "host": session.host,
+            "mission": mem.new_mission("A2")}
+    mission = mem.attach(case)
+    tools = {t.__name__: t for t in
+             autonomy.commander_tools(session, case, mission)}
+    if order == "escalate-first":
+        tools["escalate_to_human"]("routine note: continuing to observe",
+                                   "nothing specific yet")
+    summary = tools["task_hunter"]("windows-hunter", "collect")
+    verdict = tools["request_adjudication"](summary["window_id"])
+    assert verdict["verdict_state"].startswith("MALICE"), verdict
+    autonomy.raise_unescalated_malice(session, mission, [])
+    return mission
+
+
+def test_a2_the_engine_escalates_a_sealed_malice_verdict():
+    from agent import mission as mem
+    mission = _cycle("adjudicate-first")
+    basis = [b for e in mission["escalations"] for b in e["sealed_basis"]]
+    assert any(b["verdict_state"].startswith("MALICE") for b in basis)
+
+
+def test_a2_an_unrelated_open_escalation_does_not_suppress_the_engine():
+    """The confirmed vector: escalate_to_human BEFORE request_adjudication is a
+    permitted call in a permitted order, and it used to make the engine's
+    mandatory escalation not fire."""
+    mission = _cycle("escalate-first")
+    covered = [b for e in mission["escalations"] for b in e["sealed_basis"]
+               if b["verdict_state"].startswith("MALICE")]
+    assert covered, ("the engine must still escalate the sealed MALICE verdict "
+                     "even though an unrelated escalation was already open")
+    assert any(not e["unsupported_by_seal"] for e in mission["escalations"])
+
+
+def test_a2_the_engine_does_not_re_raise_the_same_verdict_twice():
+    """The negative control: the fix must not turn every cycle into a duplicate
+    escalation for a verdict already reported."""
+    import asyncio
+    from agent import autonomy, mission as mem
+    mission = _cycle("adjudicate-first")
+    before = len(mission["escalations"])
+    session = _session(case_id="A2")
+    summary = session.run_hunt(["pslist", "netstat"], reason="c")
+    session.adjudicate(summary["window_id"])
+    # same sealed verdicts already cited -> nothing new
+    sealed = [b for e in mission["escalations"] for b in e["sealed_basis"]]
+    assert sealed
+    autonomy.raise_unescalated_malice(_MockSession(sealed), mission, [])
+    assert len(mission["escalations"]) == before
+
+
+class _MockSession:
+    """A session whose audit trail replays exactly the given sealed verdicts."""
+    def __init__(self, verdicts):
+        self.audit_trail = [{"seq": i, "action": "adjudicate", "detail": v}
+                            for i, v in enumerate(verdicts)]

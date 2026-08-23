@@ -50,15 +50,12 @@ async def cycle(order):
     v = tools["request_adjudication"](w["window_id"])
     tools["schedule_next_cycle"]("re-check", 24, "routine")
 
-    # ---- exactly the engine's safety net, verbatim from autonomy.py:533-544
-    malice = [x for x in autonomy.sealed_verdicts(s)
-              if x.get("verdict_state", "").startswith("MALICE")]
-    engine_fired = bool(malice) and not mem.has_open_escalation(mission)
-    if engine_fired:
-        mem.escalate(mission, actor="engine",
-                     why=f"the sealed engine adjudicated {malice[0]['verdict_state']}",
-                     what_to_check="confirm containment",
-                     sealed_basis=malice)
+    # The engine's safety net, called LIVE (autonomy.raise_unescalated_malice)
+    # rather than re-implemented here, so this script witnesses the shipped
+    # behaviour rather than a snapshot of it. At 3f2c19c the gate was
+    # `if malice and not mem.has_open_escalation(mission)` and 'escalate-first'
+    # printed engine_fired=False; see docs/redteam/ROUND2_ARCHITECTURE.md A-2.
+    engine_fired = bool(autonomy.raise_unescalated_malice(s, mission, []))
     return v, mission, engine_fired
 
 for order in ("adjudicate-first", "escalate-first"):
