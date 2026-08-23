@@ -131,17 +131,36 @@ def _reseal_of(obj: dict, hash_field: str) -> str:
     return _sha256_canonical(unsealed, version)
 
 
-def verify_entries(entries: list, windows: dict | None = None) -> dict:
+def _host_hash(host: dict) -> str:
+    """The identity of the machine a verdict is about — independent copy of
+    core/verdict_stream.host_hash, kept in lockstep by tests."""
+    return _sha256_canonical(host, "2")
+
+
+def verify_entries(entries: list, windows: dict | None = None,
+                   case_id: str | None = None,
+                   host: dict | None = None) -> dict:
     """Verify a whole verdict chain. Returns every violation, not just the first,
     so a reviewer sees the full extent of any tampering.
 
+    Integrity is not identity. A chain can be perfectly intact and still be the
+    record of a DIFFERENT machine than the exhibit around it claims: the entries
+    seal their own ``case_id`` and (from schema v2) a ``host_hash``, while the
+    exhibit's header is plain, rewritable text. Verifying only the seals let a
+    MALICE chain be relabelled onto an innocent host and still read PASS
+    (red-team A-1). So ``case_id`` and ``host`` — what the exhibit CLAIMS this
+    chain is about — are checked against the seals here.
+
     ``windows`` optionally maps window_hash -> window dict; when present each
-    referenced window is re-sealed too. When absent, window integrity is reported
-    as a WARN (unchecked), never as a pass.
+    referenced window is re-sealed and confirmed to belong to the same case.
+    When absent, window integrity is reported as a WARN (unchecked), never as a
+    pass. A v1 entry sealed before host binding existed cannot be checked
+    against a host: that is a WARN naming exactly what was out of scope.
     """
     errors: list[str] = []
     warnings: list[str] = []
     prev_hash = GENESIS_HASH
+    seen_case_ids: set = set()
 
     if not isinstance(entries, list) or not entries:
         return {"status": "FAIL", "entries": 0,
@@ -176,6 +195,26 @@ def verify_entries(entries: list, windows: dict | None = None) -> dict:
                 errors.append(
                     f"{label}: entry_hash does not match content (tampered)")
 
+        entry_case = entry.get("case_id")
+        seen_case_ids.add(entry_case)
+        if case_id is not None and entry_case != case_id:
+            errors.append(
+                f"{label}: sealed case_id {entry_case!r} is not the case this "
+                f"exhibit presents it as ({case_id!r}) — identity substitution")
+        if host is not None:
+            sealed_host = entry.get("host_hash")
+            if not sealed_host:
+                warnings.append(
+                    f"{label}: sealed before host binding existed (schema "
+                    f"v{entry.get('schema_version')!r}), so the machine this "
+                    f"verdict is about could NOT be checked against the one "
+                    f"this exhibit names")
+            elif sealed_host != _host_hash(host):
+                errors.append(
+                    f"{label}: the sealed host does not match the host this "
+                    f"exhibit presents it as ({host.get('hostname')!r}) — "
+                    f"identity substitution")
+
         if windows is not None:
             wh = entry.get("window_hash")
             window = windows.get(wh)
@@ -184,14 +223,30 @@ def verify_entries(entries: list, windows: dict | None = None) -> dict:
             else:
                 if _reseal_of(window, "window_hash") != window.get("window_hash"):
                     errors.append(f"{label}: referenced window fails its own seal")
+                elif window.get("case_id") != entry_case:
+                    errors.append(
+                        f"{label}: referenced window belongs to case "
+                        f"{window.get('case_id')!r}, not to this entry's case "
+                        f"{entry_case!r}")
 
         prev_hash = entry.get("entry_hash")
+
+    if len(seen_case_ids) > 1:
+        errors.append(
+            f"the chain mixes entries whose sealed case_id differs "
+            f"({sorted(str(c) for c in seen_case_ids)}) — a case's chain is the "
+            f"record of ONE case")
 
     if windows is None:
         warnings.append(
             "evidence windows were not included in this exhibit: the verdict "
             "CHAIN is verified, but each window's own evidence seal was not "
             "re-checked (export with --with-windows for full coverage)")
+    if host is None:
+        warnings.append(
+            "this exhibit names no host, so the machine each verdict is about "
+            "was not checked — the chain's integrity is verified, its subject "
+            "is not")
 
     status = "FAIL" if errors else ("WARN" if warnings else "PASS")
     return {"status": status, "entries": len(entries),
@@ -209,8 +264,15 @@ def verify_bundle(bundle: dict) -> dict:
     windows = bundle.get("windows")
     if isinstance(windows, list):
         windows = {w.get("window_hash"): w for w in windows if isinstance(w, dict)}
-    report = verify_entries(entries or [], windows if windows else None)
-    report["case_id"] = (case or {}).get("case_id") if isinstance(case, dict) else None
+    # The envelope's own claim about what this chain is — checked against the
+    # seals, never simply reprinted beside a PASS (red-team A-1).
+    claimed_case = (case or {}).get("case_id") if isinstance(case, dict) else None
+    claimed_host = (case or {}).get("host") if isinstance(case, dict) else None
+    if not isinstance(claimed_host, dict):
+        claimed_host = None
+    report = verify_entries(entries or [], windows if windows else None,
+                            case_id=claimed_case, host=claimed_host)
+    report["case_id"] = claimed_case
     report["format"] = bundle.get("format")
     return report
 

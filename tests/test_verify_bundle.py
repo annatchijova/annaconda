@@ -39,8 +39,10 @@ def _sealed_chain():
 
 
 def _bundle(entries, windows=None):
+    # Shaped like GET /cases/{id}/exhibit: the envelope names the case AND the
+    # host, so the verifier can check the chain's subject, not only its seals.
     b = {"format": "annaconda-exhibit", "case": {"case_id": "EXHIBIT-T",
-         "entries": copy.deepcopy(entries)}}
+         "host": copy.deepcopy(HOST), "entries": copy.deepcopy(entries)}}
     if windows is not None:
         b["windows"] = copy.deepcopy(windows)
     return b

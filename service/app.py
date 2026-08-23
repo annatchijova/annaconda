@@ -452,9 +452,12 @@ def get_case(case_id: str) -> dict:
     case = _CASE_STORE.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
-    chain = verify_stream(case.get("entries", []))
+    chain = verify_stream(case.get("entries", []), case_id=case_id,
+                          host=case.get("host"))
     return {"case": case, "chain_ok": chain["chain_ok"],
-            "chain_errors": chain["errors"], "persistence": _CASE_STORE.backend}
+            "chain_errors": chain["errors"],
+            "chain_warnings": chain.get("warnings", []),
+            "persistence": _CASE_STORE.backend}
 
 
 @app.get("/cases/{case_id}/stix")
@@ -467,7 +470,8 @@ def get_case_stix(case_id: str) -> dict:
     case = _CASE_STORE.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
-    chain = verify_stream(case.get("entries", []))
+    chain = verify_stream(case.get("entries", []), case_id=case_id,
+                          host=case.get("host"))
     return case_to_stix(case, chain_ok=chain["chain_ok"])
 
 
@@ -483,7 +487,8 @@ def get_case_cacao(case_id: str) -> dict:
     case = _CASE_STORE.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
-    chain = verify_stream(case.get("entries", []))
+    chain = verify_stream(case.get("entries", []), case_id=case_id,
+                          host=case.get("host"))
     mission = case.get("mission") or {}
     mem = verify_mission(mission) if mission else {"memory_ok": None}
     return case_to_cacao(case, mission_ok=mem.get("memory_ok"),
@@ -501,7 +506,8 @@ def push_case_to_secops(case_id: str) -> dict:
     case = _CASE_STORE.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
-    chain = verify_stream(case.get("entries", []))
+    chain = verify_stream(case.get("entries", []), case_id=case_id,
+                          host=case.get("host"))
     bundle = case_to_stix(case, chain_ok=chain["chain_ok"])
     result = _SECOPS.push(bundle, attributes=stix_attributes(
         bundle, case_id=case_id, worst_verdict=case.get("worst_verdict"),
@@ -529,7 +535,8 @@ def get_case_exhibit(case_id: str) -> dict:
     case = _CASE_STORE.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
-    chain = verify_stream(case.get("entries", []))
+    chain = verify_stream(case.get("entries", []), case_id=case_id,
+                          host=case.get("host"))
     return {
         "format": "annaconda-exhibit",
         "format_version": 1,
@@ -544,6 +551,9 @@ def get_case_exhibit(case_id: str) -> dict:
             "entries": case.get("entries", []),
         },
         "chain_ok": chain["chain_ok"],
+        # What this service could NOT check, said out loud — the exhibit's whole
+        # point is that a third party need not trust the line above it.
+        "chain_warnings": chain.get("warnings", []),
         "verify_with": ("python3 -m tools.verify_bundle exhibit.json  "
                         "(stdlib-only, independent of this service)"),
     }
@@ -900,7 +910,8 @@ async def sweep(req: Request) -> dict:
                 from verdict.stix_export import case_to_stix
                 from service.secops_push import stix_attributes
                 fresh = _CASE_STORE.get_case(cid) or case
-                chain = verify_stream(fresh.get("entries", []))
+                chain = verify_stream(fresh.get("entries", []), case_id=cid,
+                                      host=fresh.get("host"))
                 bundle = case_to_stix(fresh, chain_ok=chain["chain_ok"])
                 secops = _SECOPS.push(bundle, attributes=stix_attributes(
                     bundle, case_id=cid, worst_verdict=fresh.get("worst_verdict"),
@@ -1153,6 +1164,9 @@ def get_stream(inv_id: str) -> Any:
     if record is None:
         raise HTTPException(status_code=404, detail="investigation not found")
     # Re-verify on read so the caller never trusts an unchecked chain.
-    report = verify_stream(record["stream"])
+    # The investigation store keeps no host record, so the subject cannot be
+    # checked here; verify_stream says so in its warnings rather than
+    # implying it was.
+    report = verify_stream(record["stream"], case_id=record.get("case_id"))
     return JSONResponse({"chain_ok": report["chain_ok"],
                          "entries": record["stream"]})

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vigia.forensics/contracts/verdict_stream_entry/1",
+  "$id": "https://vigia.forensics/contracts/verdict_stream_entry/2",
   "title": "VIGIA verdict stream entry",
   "description": "One sealed verdict in the live hash chain. Produced by the deterministic core after scoring one evidence window; consumed by the dashboard, CRONOS, and the replay verifier. The entry_hash is the SHA-256 of the canonical serialization of this document with the entry_hash field absent. Tamper evidence: entry N commits to entry N-1 via prev_entry_hash; genesis entries use 64 zeros.",
   "type": "object",
@@ -17,7 +17,10 @@
   ],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": {
+      "enum": [1, 2],
+      "description": "1 = sealed before the verdict was bound to its host. 2 adds host_hash, so a chain cannot be presented as another machine's record (red-team A-1). Verification recomputes each entry's hash from its own content, so both versions verify unchanged."
+    },
     "case_id": {
       "type": "string",
       "pattern": "^[A-Za-z0-9._-]{1,128}$"
@@ -31,6 +34,11 @@
       "type": "string",
       "pattern": "^[a-f0-9]{64}$",
       "description": "window_hash of the evidence window this verdict is sealed over."
+    },
+    "host_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 (canonical-v2) of the host record this verdict is about. Present from schema_version 2. Binds the verdict to the machine it judged, so an exhibit cannot present this chain as another host's record; a verifier holding the host recomputes it. Absent on v1 entries, which a verifier must report as an unchecked subject, never as a pass."
     },
     "prev_entry_hash": {
       "type": "string",
