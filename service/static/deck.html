@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>annaconda — deck</title>
+<style>
+  :root { --bg: #0b0e13; --fg: #e6e9ef; --dim: #6b7480; --accent: #2ecc71; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--fg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    overflow: hidden; }
+  #stage { position: fixed; inset: 0; display: flex; align-items: center;
+    justify-content: center; background: var(--bg); }
+  /* the slide keeps its 16:9 shape, letterboxed inside the viewport */
+  #slide { max-width: 100vw; max-height: 100vh; width: auto; height: auto;
+    aspect-ratio: 16 / 9; object-fit: contain; user-select: none;
+    -webkit-user-drag: none; box-shadow: 0 0 60px rgba(0,0,0,.6); }
+  /* click zones: left third goes back, the rest advances */
+  #zoneL, #zoneR { position: fixed; top: 0; bottom: 0; cursor: pointer; z-index: 5; }
+  #zoneL { left: 0; width: 33%; }
+  #zoneR { left: 33%; right: 0; }
+  /* chrome that fades out when idle */
+  .chrome { transition: opacity .35s ease; z-index: 10; }
+  body.idle .chrome { opacity: 0; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 3px;
+    background: rgba(255,255,255,.08); }
+  #barFill { height: 100%; width: 0; background: var(--accent);
+    transition: width .2s ease; }
+  #counter { position: fixed; bottom: 14px; right: 18px; font-size: 13px;
+    letter-spacing: .5px; color: var(--dim); }
+  #counter b { color: var(--fg); font-weight: 600; }
+  #hint { position: fixed; bottom: 14px; left: 18px; font-size: 12px;
+    color: var(--dim); letter-spacing: .3px; }
+  .nav { position: fixed; top: 50%; transform: translateY(-50%);
+    width: 44px; height: 44px; border-radius: 50%; z-index: 10;
+    border: 1px solid rgba(255,255,255,.12); background: rgba(20,24,31,.55);
+    color: var(--fg); font-size: 20px; cursor: pointer; display: flex;
+    align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+  .nav:hover { border-color: var(--accent); color: var(--accent); }
+  #prev { left: 16px; } #next { right: 16px; }
+  #kb { position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    font-size: 11px; color: var(--dim); letter-spacing: .4px; }
+  a.exit { color: var(--dim); text-decoration: none; }
+  a.exit:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div id="stage"><img id="slide" alt="slide" decoding="async"></div>
+
+  <div id="zoneL" class="chrome" title="Previous"></div>
+  <div id="zoneR" class="chrome" title="Next"></div>
+
+  <button id="prev" class="nav chrome" aria-label="Previous">&#8249;</button>
+  <button id="next" class="nav chrome" aria-label="Next">&#8250;</button>
+
+  <div id="kb" class="chrome">&larr; &rarr; navigate &middot; F fullscreen &middot; <a class="exit" href="/">exit</a></div>
+  <div id="hint" class="chrome">annaconda &middot; digital forensic triage</div>
+  <div id="counter" class="chrome"><b id="cur">1</b> / <span id="total">1</span></div>
+  <div id="bar" class="chrome"><div id="barFill"></div></div>
+
+<script>
+(function () {
+  var TOTAL = 59;                       // rendered slide-01 .. slide-59
+  var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+  var src = function (n) { return "/assets/deck/slide-" + pad(n) + ".png"; };
+
+  var img = document.getElementById("slide");
+  var cur = 1;
+
+  // remember where the viewer was, survive a refresh
+  var fromHash = parseInt((location.hash || "").replace("#", ""), 10);
+  if (fromHash >= 1 && fromHash <= TOTAL) cur = fromHash;
+
+  document.getElementById("total").textContent = TOTAL;
+
+  var cache = {};
+  function preload(n) {
+    if (n < 1 || n > TOTAL || cache[n]) return;
+    var i = new Image(); i.src = src(n); cache[n] = i;
+  }
+
+  function show(n) {
+    cur = Math.max(1, Math.min(TOTAL, n));
+    img.src = src(cur);
+    document.getElementById("cur").textContent = cur;
+    document.getElementById("barFill").style.width =
+      (cur / TOTAL * 100).toFixed(2) + "%";
+    if (history.replaceState) history.replaceState(null, "", "#" + cur);
+    else location.hash = cur;
+    preload(cur + 1); preload(cur + 2); preload(cur - 1);
+  }
+
+  function next() { if (cur < TOTAL) show(cur + 1); }
+  function prev() { if (cur > 1) show(cur - 1); }
+
+  document.getElementById("next").addEventListener("click", function (e) { e.stopPropagation(); next(); });
+  document.getElementById("prev").addEventListener("click", function (e) { e.stopPropagation(); prev(); });
+  document.getElementById("zoneR").addEventListener("click", next);
+  document.getElementById("zoneL").addEventListener("click", prev);
+
+  document.addEventListener("keydown", function (e) {
+    switch (e.key) {
+      case "ArrowRight": case "PageDown": case " ": next(); e.preventDefault(); break;
+      case "ArrowLeft": case "PageUp": prev(); e.preventDefault(); break;
+      case "Home": show(1); break;
+      case "End": show(TOTAL); break;
+      case "f": case "F":
+        if (!document.fullscreenElement) { document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); }
+        else { document.exitFullscreen && document.exitFullscreen(); }
+        break;
+    }
+  });
+
+  // touch swipe
+  var x0 = null;
+  document.addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener("touchend", function (e) {
+    if (x0 === null) return;
+    var dx = e.changedTouches[0].clientX - x0;
+    if (Math.abs(dx) > 40) { dx < 0 ? next() : prev(); }
+    x0 = null;
+  }, { passive: true });
+
+  // fade the chrome when the pointer rests
+  var idleT;
+  function wake() {
+    document.body.classList.remove("idle");
+    clearTimeout(idleT);
+    idleT = setTimeout(function () { document.body.classList.add("idle"); }, 2500);
+  }
+  document.addEventListener("mousemove", wake);
+  document.addEventListener("keydown", wake);
+  wake();
+
+  show(cur);
+})();
+</script>
+</body>
+</html>

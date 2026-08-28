@@ -203,6 +203,12 @@ def architecture_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "architecture.html")
 
 
+@app.get("/deck", include_in_schema=False)
+def deck_page() -> FileResponse:
+    """The pitch deck, rendered as an in-browser slide viewer."""
+    return FileResponse(STATIC_DIR / "deck.html")
+
+
 def _threat_intel_posture() -> str:
     """The external-enrichment backend, or 'unavailable' when no key is set."""
     from agent.threat_intel import posture
