@@ -283,8 +283,12 @@ python3 scripts_lib/live_velociraptor_demo.py
 ### Tests
 
 ```bash
-pip install pytest && python3 -m pytest
+pip install pytest && VIGIA_CASE_BACKEND=memory python3 -m pytest
 ```
+
+`VIGIA_CASE_BACKEND=memory` keeps the service tests on an in-process store; set
+it when `GOOGLE_CLOUD_PROJECT` is present in the environment, so the suite does
+not read or write real Firestore between runs.
 
 The suite includes the load-bearing guarantee: the same case scored in two fresh
 processes (different `PYTHONHASHSEED`) produces byte-identical seals.

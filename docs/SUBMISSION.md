@@ -95,7 +95,7 @@ A fleet that genuinely runs itself — agent-driven cycles, self-set schedules,
 escalation with reasoning, and a decision to stand down — with the verdict still
 untouchable; an enterprise catalog that refuses taskings by department, data
 class and region; tamper-evident mission memory; a prompt-injection defense
-demonstrated with two different Google models under one hash; 140 tests with a
+demonstrated with two different Google models under one hash; 303 tests with a
 determinism gate in CI.
 
 ## What we learned
