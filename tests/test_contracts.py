@@ -25,7 +25,16 @@ def test_all_schemas_parse_and_are_versioned():
         "ml_nomination.schema.json",
     ):
         schema = _load(name)
-        assert schema["properties"]["schema_version"]["const"] == 1, name
+        version = schema["properties"]["schema_version"]
+        # The point is that the accepted versions are ENUMERATED, never open: a
+        # consumer must be able to reject a shape it does not know. A schema
+        # that has evolved lists every version it still reads (the verdict
+        # stream entry admits 1 and 2 — v1 predates host binding, red-team A-1),
+        # one that has not still pins a single const.
+        admitted = ([version["const"]] if "const" in version
+                    else list(version["enum"]))
+        assert admitted and all(isinstance(v, int) for v in admitted), name
+        assert 1 in admitted, f"{name} must still read v1 instances"
         assert "schema_version" in schema["required"], name
         assert schema["additionalProperties"] is False, name
 

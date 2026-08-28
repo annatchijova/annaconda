@@ -1,0 +1,32 @@
+[
+ {
+  "Pid": 4212,
+  "Ppid": 612,
+  "Name": "powershell.exe",
+  "Exe": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "CommandLine": "powershell.exe -nop -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA",
+  "Username": "LAB\\jdoe",
+  "CreateTime": "2026-08-12T14:03:11Z",
+  "analysis_status": "PENDING"
+ },
+ {
+  "Pid": 612,
+  "Ppid": 512,
+  "Name": "svchost.exe",
+  "Exe": "C:\\Windows\\System32\\svchost.exe",
+  "CommandLine": "C:\\Windows\\system32\\svchost.exe -k netsvcs -p",
+  "Username": "NT AUTHORITY\\SYSTEM",
+  "CreateTime": "2026-08-12T13:55:02Z",
+  "analysis_status": "PENDING"
+ },
+ {
+  "Pid": 5120,
+  "Ppid": 4212,
+  "Name": "updater.exe",
+  "Exe": "C:\\Users\\jdoe\\AppData\\Local\\Temp\\updater.exe",
+  "CommandLine": "updater.exe --silent",
+  "Username": "LAB\\jdoe",
+  "CreateTime": "2026-08-12T14:03:40Z",
+  "analysis_status": "PENDING"
+ }
+]

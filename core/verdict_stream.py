@@ -48,6 +48,22 @@ def _sha256_canonical(obj) -> str:
     return hashlib.sha256(serialized).hexdigest()
 
 
+def host_hash(host) -> str:
+    """The identity of the machine a verdict is about, as one hash.
+
+    A sealed verdict that does not name its host is only half an identity: the
+    hostname beside it in an exhibit is then a free-text label anyone can
+    rewrite, and the chain still verifies (red-team A-1). Sealing this hash into
+    every entry makes the binding checkable by anyone holding the host record,
+    with or without the evidence windows.
+
+    Same canonical-v2 + SHA-256 recipe as everything else here.
+    """
+    if not isinstance(host, dict):
+        raise StreamError(f"host must be a dict, got {type(host).__name__}")
+    return _sha256_canonical(host)
+
+
 def _exact_fraction_str(value, field: str) -> str:
     """Convert a scorer numeric (decimal-quantized float / int / Fraction)
     to an exact ``num/den`` string. ``Fraction(str(x))`` over a decimal
@@ -101,10 +117,15 @@ def build_stream_entry(*, window: dict, scorer_result: dict,
     }
 
     entry = {
-        "schema_version": 1,
+        # v2 adds host_hash. Verification recomputes each entry's hash from its
+        # own content, so a v1 entry sealed before this existed still verifies
+        # unchanged; only the host binding is unavailable for it, and
+        # verify_stream says so rather than passing it silently.
+        "schema_version": 2,
         "case_id": window["case_id"],
         "sequence": window["sequence"],
         "window_hash": window["window_hash"],
+        "host_hash": host_hash(window["host"]),
         "prev_entry_hash": prev_entry_hash,
         "verdict": {
             "state": quad["verdict_state"],
@@ -121,14 +142,35 @@ def build_stream_entry(*, window: dict, scorer_result: dict,
     return entry
 
 
-def verify_stream(entries: list, windows: Optional[dict] = None) -> dict:
-    """Verify a whole stream. Returns ``{"chain_ok": bool, "errors": [...]}``
-    — every violation found, never just the first, so an auditor sees the
-    full damage. ``windows`` (optional) maps window_hash -> window dict to
-    additionally re-verify each referenced window's own seal.
+def verify_stream(entries: list, windows: Optional[dict] = None, *,
+                  case_id: Optional[str] = None,
+                  host: Optional[dict] = None) -> dict:
+    """Verify a whole stream. Returns ``{"chain_ok": bool, "errors": [...],
+    "warnings": [...]}`` — every violation found, never just the first, so an
+    auditor sees the full damage.
+
+    Three layers, and they answer different questions:
+
+    - **integrity** — was any entry altered, inserted, reordered or dropped?
+    - **identity** (red-team A-1) — is this chain the record of the case and
+      host it is being presented as? A chain is sealed over its ``case_id`` and
+      (from schema v2) its ``host_hash``, but nothing compared those to the
+      envelope carrying them, so a MALICE chain could be presented as another
+      machine's record and still verify. Pass ``case_id`` / ``host`` — whatever
+      the caller is claiming this chain belongs to — and the claim is checked
+      against the seals instead of taken on trust.
+    - **evidence** — ``windows`` (optional) maps window_hash -> window dict to
+      re-verify each referenced window's own seal, and to confirm the window
+      belongs to the same case as the entry that cites it.
+
+    A v1 entry, sealed before the host binding existed, cannot be checked
+    against a host. That is reported as a WARNING, never as a pass: the reader
+    learns exactly what was out of scope.
     """
     errors = []
+    warnings = []
     prev_hash = GENESIS_HASH
+    seen_case_ids = set()
     for position, entry in enumerate(entries):
         label = f"entry[{position}]"
         if not isinstance(entry, dict):
@@ -146,6 +188,27 @@ def verify_stream(entries: list, windows: Optional[dict] = None) -> dict:
         recomputed = _sha256_canonical(unsealed)
         if entry.get("entry_hash") != recomputed:
             errors.append(f"{label}: entry_hash does not match content (tampered)")
+
+        # -- identity -------------------------------------------------------
+        entry_case = entry.get("case_id")
+        seen_case_ids.add(entry_case)
+        if case_id is not None and entry_case != case_id:
+            errors.append(
+                f"{label}: sealed case_id {entry_case!r} is not the case this "
+                f"chain is presented as ({case_id!r}) — identity substitution")
+        if host is not None:
+            sealed_host = entry.get("host_hash")
+            if not sealed_host:
+                warnings.append(
+                    f"{label}: sealed before host binding existed "
+                    f"(schema v{entry.get('schema_version')!r}), so the host it "
+                    f"judged could NOT be checked against the one claimed")
+            elif sealed_host != host_hash(host):
+                errors.append(
+                    f"{label}: sealed host does not match the host this chain "
+                    f"is presented as ({host.get('hostname')!r}) — identity "
+                    f"substitution")
+
         if windows is not None:
             from tools.velociraptor.adapter import verify_window
             window = windows.get(entry.get("window_hash"))
@@ -153,8 +216,24 @@ def verify_stream(entries: list, windows: Optional[dict] = None) -> dict:
                 errors.append(f"{label}: referenced window not provided")
             elif not verify_window(window):
                 errors.append(f"{label}: referenced window fails its own seal")
+            elif window.get("case_id") != entry_case:
+                errors.append(
+                    f"{label}: referenced window belongs to case "
+                    f"{window.get('case_id')!r}, not to this entry's case "
+                    f"{entry_case!r}")
         prev_hash = entry.get("entry_hash")
-    return {"chain_ok": not errors, "entries": len(entries), "errors": errors}
+
+    if len(seen_case_ids) > 1:
+        errors.append(
+            f"chain mixes entries whose sealed case_id differs "
+            f"({sorted(str(c) for c in seen_case_ids)}) — a case's chain is the "
+            f"record of ONE case")
+    if host is None and entries:
+        warnings.append(
+            "no host was supplied, so the machine each verdict is about was not "
+            "checked — the chain's integrity is verified, its subject is not")
+    return {"chain_ok": not errors, "entries": len(entries), "errors": errors,
+            "warnings": warnings}
 
 
 def _last_entry(stream_path) -> Optional[dict]:

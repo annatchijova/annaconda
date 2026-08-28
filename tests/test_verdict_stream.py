@@ -30,6 +30,7 @@ WINDOW_SPECS = [
 ]
 
 _FRACTION_RE = re.compile(r"^-?(0|[1-9][0-9]*)/([1-9][0-9]*)$")
+_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 
 
 @pytest.fixture(scope="module")
@@ -67,7 +68,8 @@ def test_chain_verifies_end_to_end(chain):
 def test_entries_conform_to_contract(chain):
     _, entries = chain
     for entry in entries:
-        assert entry["schema_version"] == 1
+        assert entry["schema_version"] == 2
+        assert _SHA256_RE.fullmatch(entry["host_hash"])
         assert entry["canonicalize_version"] == "2"
         assert entry["verdict"]["determinism_level"] == "sealed"
         # No floats in a sealed entry: exact fraction strings only.
