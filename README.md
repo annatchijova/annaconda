@@ -108,6 +108,12 @@ rather than faking a result.
 
 ## Architecture
 
+<p align="center">
+  <a href="https://vigia-live-1028999311218.us-central1.run.app/architecture">
+    <img src="visual/architecture.png" alt="annaconda system architecture" width="900">
+  </a>
+</p>
+
 ```
 Cloud Scheduler → Pub/Sub ─┐
 Browser ───────────────────┴→ Cloud Run (FastAPI) → ADK agents (Gemini 3.5, Vertex AI)
