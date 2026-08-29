@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="visual/logo.jpeg" alt="annaconda logo" width="600">
+</p>
+
 # annaconda
 
 **Live purple-team DFIR with verdicts a court could trust.** annaconda analyzes
@@ -10,6 +14,7 @@ and its hash never change.
 
 > Built for the **All Things Agentic Hackathon** (Google / Gemini).
 > Live: **https://vigia-live-1028999311218.us-central1.run.app**
+> Pitch deck: **https://vigia-live-1028999311218.us-central1.run.app/deck#1**
 
 ---
 
@@ -362,3 +367,33 @@ Apache-2.0 — open source not because the hackathon requires it (it doesn't), b
 because forensic tooling that decides on people's lives should be inspectable by
 anyone. Pre-existing work this builds on is disclosed in
 [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+
+## Screenshots
+
+Walk the live app yourself at
+[the deck](https://vigia-live-1028999311218.us-central1.run.app/deck#1) and the
+[live service](https://vigia-live-1028999311218.us-central1.run.app), or see it here.
+
+**The autonomous DFIR analyst that keeps the model out of the verdict**
+![Landing page](visual/screens/screen-1-hero.png)
+
+**A sealed, court-defensible verdict — MALICE, high severity, mapped to MITRE**
+![Sealed verdict](visual/screens/screen-2-verdict.png)
+
+**Sealed verdict over live endpoint telemetry**
+![Sealed verdict over telemetry](visual/screens/screen-3-sealed.png)
+
+**The fleet, working unattended**
+![Fleet console](visual/screens/screen-4-fleet.png)
+
+**The cross-department catalog: agents published with clearances and an approved tool hash**
+![Agent catalog](visual/screens/screen-5-catalog.png)
+
+**Ask the mentor — talking to a Gemini agent**
+![Mentor chat](visual/screens/screen-6-mentor.png)
+
+**The case queue, with ABSTAIN as a first-class outcome**
+![Case queue](visual/screens/screen-7-queue.png)
+
+**They act, delegate and explain. None of them decides.**
+![The thesis](visual/screens/screen-8-thesis.png)
