@@ -24,10 +24,22 @@ VERSION = "0.77.1"
 BINARY_DIR = Path(__file__).resolve().parent
 
 
+#: What ``platform.machine()`` reports, mapped to upstream's asset naming.
+#: Unknown machines fall through to amd64: the consequence is a "binary not
+#: present" skip on an exotic host, which is honest degradation, never a wrong
+#: verdict. 32-bit x86 is listed explicitly because upstream really does
+#: publish a ``-386`` asset, so guessing amd64 there would miss a binary that
+#: exists.
+_ARCH_ALIASES = {
+    "x86_64": "amd64", "amd64": "amd64",
+    "arm64": "arm64", "aarch64": "arm64",
+    "i386": "386", "i686": "386", "x86": "386",
+}
+
+
 def target_triple() -> tuple[str, str]:
     """``(os, arch)`` as upstream names them for this machine."""
-    machine = platform.machine().lower()
-    arch = "arm64" if machine in ("arm64", "aarch64") else "amd64"
+    arch = _ARCH_ALIASES.get(platform.machine().lower(), "amd64")
     if sys.platform == "win32":
         return "windows", arch
     if sys.platform == "darwin":

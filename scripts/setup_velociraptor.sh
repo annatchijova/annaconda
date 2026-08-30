@@ -43,9 +43,29 @@ curl -fsSL -O "${BASE_URL}/${BINARY}"
 curl -fsSL -O "${BASE_URL}/${BINARY}.sig"
 
 echo "==> Importing Velocidex release signing key (${GPG_FINGERPRINT})"
-gpg --keyserver keyserver.ubuntu.com --recv-keys "${GPG_FINGERPRINT}"
+# The keyserver protocol needs a port that restricted networks routinely block
+# (observed: "keyserver receive failed: Connection timed out" behind an
+# HTTPS-only egress proxy). Fall back to the same keyserver's HTTPS interface.
+# The transport is not what makes this safe: whatever arrives is still pinned
+# by the VALIDSIG assertion below, so a hostile fetch fails loudly instead of
+# substituting a key.
+gpg --keyserver keyserver.ubuntu.com --recv-keys "${GPG_FINGERPRINT}" || {
+    echo "==> keyserver protocol failed; retrying over HTTPS"
+    curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x${GPG_FINGERPRINT}" \
+        | gpg --import
+}
 
 echo "==> Verifying signature"
+# `gpg --verify` alone only proves SOME key in the local keyring signed this.
+# The property this script claims is stronger -- that the release was signed by
+# the pinned key -- so assert VALIDSIG against the fingerprint rather than
+# trusting the exit code and a human reading the prose output.
+if ! gpg --status-fd 1 --verify "${BINARY}.sig" "${BINARY}" 2>/dev/null \
+        | grep -q "^\[GNUPG:\] VALIDSIG ${GPG_FINGERPRINT} "; then
+    echo "==> FAIL: ${BINARY} is not signed by ${GPG_FINGERPRINT}" >&2
+    echo "    Refusing to install an unverified forensic collector." >&2
+    exit 1
+fi
 gpg --verify "${BINARY}.sig" "${BINARY}"
 
 chmod +x "${BINARY}"
