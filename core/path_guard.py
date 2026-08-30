@@ -92,12 +92,39 @@ class PathGuard:
                 inode=0, size=0, mtime=0.0, hash_prefix="",
             )
 
-        # Verificar symlinks en CUALQUIER componente de la ruta
+        # Verificar redirecciones en CUALQUIER componente de la ruta.
+        #
+        # is_symlink() NO alcanza en Windows. Una junction (punto de reanálisis
+        # de directorio, `mklink /J`, que cualquier usuario sin privilegios
+        # puede crear) redirige igual que un symlink, pero is_symlink() y
+        # os.path.islink() devuelven False para ella. Como la allowlist se
+        # evalúa sobre el path LÉXICO — deliberadamente, para no perder la
+        # evidencia de que la ruta atravesó una redirección — un archivo de
+        # afuera alcanzado a través de una junction se lee como si estuviera
+        # adentro.
+        #
+        # Verificado en Windows 11 / Python 3.12: el acceso directo al archivo
+        # externo da OUTSIDE_ALLOWLIST, y el MISMO archivo a través de una
+        # junction da VALID y safe_read() devuelve su contenido. El fstat de
+        # S_ISREG no lo detecta (el destino es un archivo regular) y O_NOFOLLOW
+        # tampoco existe en Windows, así que este chequeo era la única defensa.
+        #
+        # st_reparse_tag es distinto de cero para CUALQUIER punto de reanálisis
+        # (junction, symlink, mount point) y no existe en POSIX, donde
+        # is_symlink() ya cubre el caso: getattr con default 0 mantiene la
+        # ruta POSIX idéntica.
         try:
             for parent in [abs_path] + list(abs_path.parents):
-                if parent.exists() and parent.is_symlink():
+                if not parent.exists():
+                    continue
+                if parent.is_symlink():
                     return PathValidationResult(
                         valid=False, reason="SYMLINK_DETECTED_IN_PATH",
+                        inode=0, size=0, mtime=0.0, hash_prefix="",
+                    )
+                if getattr(os.lstat(str(parent)), "st_reparse_tag", 0):
+                    return PathValidationResult(
+                        valid=False, reason="REPARSE_POINT_DETECTED_IN_PATH",
                         inode=0, size=0, mtime=0.0, hash_prefix="",
                     )
         except OSError as e:
