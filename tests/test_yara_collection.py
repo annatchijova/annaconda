@@ -127,6 +127,20 @@ def test_the_committed_baseline_resolves():
     assert "annaconda_purple_team_marker" in text
 
 
+def test_the_selftest_marker_matches_utf16_as_well_as_ascii():
+    """The marker exists to prove the collection path works on a real host.
+
+    Windows keeps strings in memory as UTF-16 and Windows PowerShell 5.1
+    writes UTF-16LE files by default, so an ascii-only marker misses the two
+    most likely ways somebody produces the test data -- and the miss looks
+    like a broken pipeline rather than a rule that did not match.
+    """
+    text = resolve_ruleset("purple_team_baseline").read_text(encoding="utf-8")
+    marker_line = next(line for line in text.splitlines()
+                       if "$marker" in line and "=" in line)
+    assert "ascii" in marker_line and "wide" in marker_line, marker_line
+
+
 # --------------------------------------------------------------------------
 # The load-bearing one: collection does not decide
 # --------------------------------------------------------------------------

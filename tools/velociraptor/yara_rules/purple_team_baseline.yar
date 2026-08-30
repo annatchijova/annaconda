@@ -20,7 +20,11 @@ rule annaconda_purple_team_marker
         reference   = "write the marker string to a file, scan it, watch it seal"
 
     strings:
-        $marker = "ANNACONDA-PURPLE-TEAM-YARA-SELFTEST"
+        // ascii AND wide, both deliberately: Windows holds strings in memory as
+        // UTF-16, and Windows PowerShell 5.1's Out-File writes UTF-16LE by
+        // default. An ascii-only marker silently misses both, which reads as
+        // "the collection path is broken" when the rule is what missed.
+        $marker = "ANNACONDA-PURPLE-TEAM-YARA-SELFTEST" ascii wide
 
     condition:
         $marker
