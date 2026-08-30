@@ -37,8 +37,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.velociraptor.adapter import (  # noqa: E402
-    MockTransport, VelociraptorQueryTransport, collect_window, verify_window,
-    window_to_case,
+    MockTransport, VelociraptorQueryTransport, collect_window,
+    is_plausible_event_time, verify_window, window_to_case,
 )
 from tools.velociraptor.release import host_block  # noqa: E402
 from tools.velociraptor.vql_templates import TEMPLATES  # noqa: E402
@@ -124,13 +124,27 @@ class _Recording:
 DEFAULT_TEMPLATES = ("pslist", "netstat", "process_creation_evtx", "scheduled_tasks")
 
 
-def _bounds(artifacts: list) -> tuple[str, str]:
+def _bounds(artifacts: list) -> tuple[str, str, int]:
     """Window bounds from the evidence itself -- no clock, so replay reseals
-    to the same hash. Falls back to a stated placeholder on empty collection."""
-    stamps = sorted(a["timestamp"] for a in artifacts if a.get("timestamp"))
-    if not stamps:
-        return "1970-01-01T00:00:00Z", "1970-01-01T00:00:00Z"
-    return stamps[0], stamps[-1]
+    to the same hash.
+
+    Sentinel timestamps are excluded. A real collection from this host had 59%
+    of its network rows stamped 1601-01-01 (Windows FILETIME zero: TIME_WAIT
+    sockets with no owning process), and taking the plain minimum made the
+    SEALED window declare it covered four centuries it never observed. The
+    artifacts are kept -- a socket with no recorded time is still evidence the
+    socket existed -- but a value that cannot date anything does not get to
+    define the window's temporal claim. Returns the count of exclusions so the
+    caller can state it rather than quietly narrowing the window.
+    """
+    usable = sorted(a["timestamp"] for a in artifacts
+                    if is_plausible_event_time(a.get("timestamp")))
+    excluded = len(artifacts) - len(usable)
+    if not usable:
+        # No artifact can date anything: say so with a sentinel of our own
+        # rather than inventing a span out of the sentinels we just rejected.
+        return "1970-01-01T00:00:00Z", "1970-01-01T00:00:00Z", excluded
+    return usable[0], usable[-1], excluded
 
 
 def _check_against_live(dump_dir: Path, replayed: dict) -> int:
@@ -255,7 +269,7 @@ def main() -> int:
 
     # Reseal over evidence-derived bounds so live and replay agree.
     from tools.velociraptor.adapter import build_evidence_window
-    start, end = _bounds(window["artifacts"])
+    start, end, undatable = _bounds(window["artifacts"])
     window = build_evidence_window(
         case_id=window["case_id"], sequence=window["sequence"],
         source=window["source"], host=window["host"],
@@ -288,6 +302,10 @@ def main() -> int:
 
     print(f"\n[window] {window['window_id']}  artifacts={len(window['artifacts'])}  "
           f"bounds={start} .. {end}")
+    if undatable:
+        print(f"[window] {undatable} artifact(s) carry no usable event time "
+              "(sentinel epoch) and were excluded from the bounds -- they are "
+              "still sealed as evidence, they just cannot date anything")
     print(f"[window] window_hash={window['window_hash']}")
     print(f"[window] verifies: {verify_window(window)}")
 

@@ -304,3 +304,48 @@ def test_boundary_rejects_bad_inputs():
         build_evidence_window(**{**good, "source": "live_feed"})
     with pytest.raises(AdapterError):
         build_evidence_window(**{**good, "host": {"client_id": "C.1"}})
+
+
+# --------------------------------------------------------------------------
+# Sentinel epochs at the custody boundary. Found in real Windows telemetry:
+# 59% of a netstat collection stamped 1601-01-01 (FILETIME zero), which the
+# sealed window then adopted as the start of its coverage.
+# --------------------------------------------------------------------------
+
+def test_sentinel_epochs_are_not_event_times():
+    from tools.velociraptor.adapter import is_plausible_event_time
+    assert not is_plausible_event_time("1601-01-01T00:00:00Z"), "Windows FILETIME zero"
+    assert not is_plausible_event_time("1970-01-01T00:00:00Z"), "Unix epoch zero"
+    assert not is_plausible_event_time("2099-01-01T00:00:00Z"), "implausible future"
+    for junk in ("", "   ", None, 0, "not-a-date"):
+        assert not is_plausible_event_time(junk)
+
+
+def test_real_collection_times_are_event_times():
+    from tools.velociraptor.adapter import is_plausible_event_time
+    assert is_plausible_event_time("2026-08-30T15:26:10Z")
+    assert is_plausible_event_time("2026-08-30T15:26:10+00:00")
+    assert is_plausible_event_time("2026-08-30T15:26:10")  # naive, assumed UTC
+
+
+def test_window_bounds_exclude_sentinels_but_keep_the_artifacts():
+    """The sealed window must not claim coverage it never observed.
+
+    Shaped after the real collection: hundreds of ownerless TIME_WAIT sockets
+    carrying FILETIME zero, plus a handful of genuinely dated rows.
+    """
+    from scripts_lib.windows_live_collect import _bounds
+    artifacts = [{"timestamp": "1601-01-01T00:00:00Z"} for _ in range(576)]
+    artifacts += [{"timestamp": "2025-12-16T10:18:00Z"},
+                  {"timestamp": "2026-08-30T15:26:10Z"}]
+    start, end, excluded = _bounds(artifacts)
+    assert start == "2025-12-16T10:18:00Z", "the sentinel became the window start"
+    assert end == "2026-08-30T15:26:10Z"
+    assert excluded == 576, "the exclusions must be counted, not silently dropped"
+
+
+def test_bounds_with_nothing_datable_say_so_rather_than_inventing_a_span():
+    from scripts_lib.windows_live_collect import _bounds
+    start, end, excluded = _bounds([{"timestamp": "1601-01-01T00:00:00Z"}] * 3)
+    assert start == end, "a span was invented out of rejected sentinels"
+    assert excluded == 3

@@ -95,3 +95,42 @@ def test_pid_comparison_survives_string_versus_int():
     The same process must not read as two just because of the JSON type."""
     tcv, _ = _fractures_of(_net(pid="6120"), _proc(pid=6120))
     assert len(tcv) == 1, "same PID missed across int/str representations"
+
+
+# --------------------------------------------------------------------------
+# PID 0 -- observed in real Windows telemetry: 59% of a netstat collection,
+# all TIME_WAIT sockets with no owning process.
+# --------------------------------------------------------------------------
+
+def test_sockets_with_no_owning_process_do_not_pair_with_each_other():
+    """PID 0 is a sentinel for "no owner", not an id two rows can share.
+
+    Without this, hundreds of unrelated closed sockets all carry pid 0 and
+    match each other the moment the structured event times get derived --
+    which is precisely the work still outstanding.
+    """
+    tcv, _ = _fractures_of(_net(pid=0), _proc(pid=0))
+    assert tcv == [], "two 'no owning process' rows were treated as one execution"
+
+
+def test_a_no_owner_socket_does_not_pair_with_a_real_process():
+    tcv, _ = _fractures_of(_net(pid=0), _proc(pid=4212))
+    assert tcv == []
+
+
+def test_no_owner_is_a_determinate_answer_not_a_disclosed_gap():
+    """It must not reach temporal_pairs_skipped: that gate turns an otherwise
+    clean verdict into ABSTAIN, and "this socket has no owner" is knowledge,
+    not missing data."""
+    _, engine = _fractures_of(_net(pid=0), _proc(pid=4212))
+    assert engine._temporal_pairs_skipped == []
+
+
+def test_a_real_pid_still_fires_alongside_no_owner_noise():
+    """The signal must survive the noise: a genuine same-PID violation still
+    fires in a window full of ownerless sockets."""
+    artifacts = [_net(pid=0) for _ in range(50)]
+    artifacts += [_net(pid=6120), _proc(pid=6120)]
+    tcv, _ = _fractures_of(*artifacts)
+    assert len(tcv) == 1, "the real violation was lost among ownerless sockets"
+    assert tcv[0].severity == 1.0

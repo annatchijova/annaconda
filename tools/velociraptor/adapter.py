@@ -29,6 +29,7 @@ import json
 import re
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional, Protocol
 
@@ -53,6 +54,43 @@ _ENGINE_METADATA_FIELDS = (
     "status",                 # collection/analysis state (intake-abstain gate)
     "analysis_status",        # PENDING -> the honest verdict is ABSTAIN
 )
+
+
+# Sentinel epochs that mean "this row carries no event time", not a time.
+# Windows FILETIME zero surfaces as 1601-01-01 (observed: 59% of a real
+# netstat collection -- TIME_WAIT sockets with no owning process), and Unix
+# epoch zero as 1970-01-01. Both are syntactically valid ISO-8601 and both are
+# lies about when something happened.
+#
+# The deterministic engine already refuses these inside its temporal-causality
+# rule (tools/caie.py, guard R3-1, which names the FILETIME 1601 case by hand).
+# That guard sits in ONE consumer, so every other consumer of the same
+# timestamps had to rediscover the problem -- and one did: the sealed window's
+# own time bounds took the minimum over all artifacts and adopted 1601 as the
+# start of the collection, making the window assert temporal coverage of four
+# centuries it never had. Custody claims belong at the boundary, so the
+# predicate lives here, where evidence enters.
+PLAUSIBLE_EVENT_TIME_MIN = datetime(2000, 1, 1, tzinfo=timezone.utc)
+PLAUSIBLE_EVENT_TIME_MAX = datetime(2038, 1, 19, 3, 14, 7, tzinfo=timezone.utc)
+
+
+def is_plausible_event_time(timestamp) -> bool:
+    """True when ``timestamp`` can be read as a real event time.
+
+    Deliberately narrow: this answers "may this value be used as a claim about
+    when something happened", not "is this row worth keeping". A TIME_WAIT
+    socket with no recorded time is still evidence that the socket exists; it
+    just cannot date anything.
+    """
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        return False
+    try:
+        parsed = datetime.fromisoformat(timestamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return PLAUSIBLE_EVENT_TIME_MIN <= parsed < PLAUSIBLE_EVENT_TIME_MAX
 
 
 def _sha256_canonical(obj) -> str:
