@@ -407,7 +407,12 @@ def _sanitize_grep_pattern(pattern: str) -> str:
     so a pattern like "safe_text\\x00; rm -rf /" would pass match but fail
     fullmatch.
     """
-    from vigia.security import audit_logger  # lazy: evita import circular
+    # Lazy para evitar el circular: security/__init__ importa este módulo, así
+    # que se importa el SUBMÓDULO security.security, no el paquete.
+    # Era `from vigia.security import ...`: no existe ningún paquete `vigia` en
+    # este repo, de modo que esta línea levantaba ModuleNotFoundError en la
+    # primera línea del cuerpo de la función.
+    from security.security import audit_logger
 
     if not isinstance(pattern, str):
         raise ValueError("Pattern must be a string.")
@@ -484,11 +489,20 @@ async def safe_grep(
         scan_volume_bytes (int)    – total bytes in scanned directory tree
         depth_limit_applied (int) – the effective depth limit used
     """
-    # local imports avoid circular (vigia.security.__init__ importa sandbox).
+    # local imports avoid circular (security/__init__ importa sandbox), de ahí
+    # que se importe el SUBMÓDULO security.security y no el paquete.
+    #
     # audit_logger: TANDA 2 — estaba SIN bindear en este módulo; safe_grep
     # crasheaba con NameError en la primera llamada real (línea del
     # GREP_DEPTH_LIMIT log). Latente porque el corpus JSON no ejercita grep.
-    from vigia.security import _sanitize_path, audit_logger
+    #
+    # Y el arreglo de TANDA 2 volvió a caer en lo mismo: apuntaba a
+    # `vigia.security`, y no existe ningún paquete `vigia` en este repo. El
+    # NameError se convirtió en ModuleNotFoundError en la MISMA primera línea
+    # del cuerpo, latente por la MISMA razón — nada llama a safe_grep. Un
+    # arreglo para una función que nadie ejecuta tampoco se ejecuta; de ahí el
+    # test que ahora sí la llama.
+    from security.security import _sanitize_path, audit_logger
 
     # Validate folder path
     try:
