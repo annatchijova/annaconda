@@ -336,6 +336,14 @@ Against the **Fortified Enterprise Fleet** criteria specifically:
 
 ### Locally
 
+**Step by step for Linux, macOS and Windows — with the commands for each, the
+virtualenv, the tests, and live collection — is in
+[INSTALL.md](INSTALL.md).** Windows differs in more than path separators
+(live collection needs an elevated shell, `curl` in PowerShell 5.1 is not curl),
+so it is written out rather than left to guess.
+
+The short version, on Linux or macOS:
+
 ```bash
 pip install -r requirements.txt
 # Agents use Vertex AI on Cloud Run; locally set a Gemini API key:
