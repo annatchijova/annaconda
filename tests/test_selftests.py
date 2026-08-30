@@ -11,6 +11,7 @@ them. Two honest tiers, kept distinct on purpose:
   on honest degradation: a green that cannot distinguish the two is forbidden).
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,11 +34,34 @@ SUCCESS_MARKER = "TODOS LOS TESTS PASARON"
 
 
 def _run_module(module: str) -> subprocess.CompletedProcess:
+    """Run a module's inline suite, stating the encoding of the channel we judge by.
+
+    ``text=True`` alone decodes with the locale's preferred encoding and lets
+    the child inherit the console codepage. That is UTF-8 on Linux and macOS
+    but the ANSI codepage on Windows, and these suites print box-drawing
+    characters and "✓". The result was a verdict decided by the presentation
+    layer: the child died of UnicodeEncodeError before its asserts could run,
+    the parent then hit UnicodeDecodeError reading the partial output, and this
+    wrapper reported both as "<module> self-test failed" -- a red verdict about
+    code that was never executed, which is exactly the collapse this file's
+    own docstring forbids.
+
+    ``PYTHONIOENCODING`` fixes the write side and ``encoding`` the read side.
+    On POSIX both were already UTF-8, so nothing changes there. Naming the
+    codec also removes a locale-dependent decode from the test path.
+    ``errors="replace"`` keeps a mangled byte from crashing the reporter; the
+    verdict still rests on the exit code and the success marker, never on the
+    prose.
+    """
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     return subprocess.run(
         [sys.executable, "-m", module],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
         timeout=300,
     )
 

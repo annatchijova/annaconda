@@ -40,6 +40,7 @@ from tools.velociraptor.adapter import (  # noqa: E402
     MockTransport, VelociraptorQueryTransport, collect_window, verify_window,
     window_to_case,
 )
+from tools.velociraptor.release import host_block  # noqa: E402
 from tools.velociraptor.vql_templates import TEMPLATES  # noqa: E402
 
 # Template id -> VQL that gathers it on Windows. Keyed by the template's
@@ -175,7 +176,8 @@ def main() -> int:
                     help="replay saved rows from DIR instead of collecting live")
     ap.add_argument("--out", default="evidence_dump",
                     help="where to write the raw rows (default: evidence_dump)")
-    ap.add_argument("--hostname", default="WIN-LIVE-01")
+    ap.add_argument("--hostname", default=None,
+                    help="override the collected host's name (default: this machine)")
     ap.add_argument("--examiner-id", default="anna")
     ap.add_argument("--case-id", default="WIN-LIVE-001")
     ap.add_argument("--templates", nargs="+", default=list(DEFAULT_TEMPLATES),
@@ -218,12 +220,30 @@ def main() -> int:
         "yara_file": {"RuleSet": args.ruleset, "TargetGlob": args.yara_glob},
     }
     requests = [(t, params.get(t, {})) for t in args.templates]
+
+    # The host block is sealed into the window, so it is a provenance claim.
+    # Live: describe the machine actually being collected from -- this said
+    # "windows" unconditionally, which a live run on any other platform would
+    # have sealed as a falsehood. Replay: the evidence belongs to the ORIGINAL
+    # host, not to the machine replaying it, so take the custody the live run
+    # recorded rather than re-deriving it from the wrong computer.
+    host = host_block()
+    if args.hostname:
+        host["hostname"] = args.hostname
+    if args.replay:
+        saved = Path(args.replay) / "live_window.json"
+        if saved.is_file():
+            recorded = json.loads(saved.read_text(encoding="utf-8")).get("host")
+            if isinstance(recorded, dict) and recorded:
+                host = recorded
+                print(f"[replay] host custody from the live run: "
+                      f"{host.get('hostname')} ({host.get('os')})")
+
     try:
         window, reports = collect_window(
             transport, case_id=args.case_id, sequence=0,
             source="velociraptor" if not args.replay else "replay",
-            host={"client_id": "C.localhost", "hostname": args.hostname,
-                  "os": "windows"},
+            host=host,
             # Provisional bounds; resealed below from the rows themselves.
             time_start_utc="1970-01-01T00:00:00Z",
             time_end_utc="1970-01-01T00:00:00Z",
