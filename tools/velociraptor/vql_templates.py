@@ -21,12 +21,15 @@ Adding a template is a reviewed change to workstream 1, not runtime data.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Dict
 
 # Conservative slot patterns. Deny-by-default: anything not matching fails.
 _P_EVENT_ID = r"[0-9]{1,6}"
 _P_CHANNEL = r"[A-Za-z0-9 ._/-]{1,128}"
 _P_GLOB = r"[A-Za-z0-9 ._:\\/*?-]{1,256}"
+# A committed ruleset FILENAME, never rule text. See the YARA templates below.
+_P_RULESET = r"[A-Za-z0-9_-]{1,64}"
 
 TEMPLATES: Dict[str, dict] = {
     "pslist": {
@@ -66,7 +69,82 @@ TEMPLATES: Dict[str, dict] = {
             "TasksPath": _P_GLOB,
         },
     },
+    # -----------------------------------------------------------------------
+    # Malware detection: Velociraptor's own YARA engine.
+    #
+    # Detection lives on the collector's side of the boundary, which is the
+    # point: Velociraptor already knows how to match rules against process
+    # memory and files, so annaconda collects and SEALS those matches instead
+    # of reimplementing a scanner.
+    #
+    # Two constraints hold here, and neither is incidental:
+    #
+    # 1. Rules are NEVER a caller-supplied value. ``RuleSet`` names a file
+    #    committed to tools/velociraptor/yara_rules/ and validated against
+    #    _P_RULESET; rule TEXT is not accepted from anyone. A YARA rule is
+    #    executable matching logic, so accepting it as a parameter would be
+    #    exactly the free-form instruction reaching the evidence source that
+    #    this registry exists to prevent -- and an expensive rule is a denial
+    #    of service against the endpoint being investigated.
+    #
+    # 2. A match collected here carries NO verdict weight. The adapter assigns
+    #    every collected artifact the EBS no-signal floor because collecting
+    #    is not analyzing, and that is left deliberately unchanged: a hit is
+    #    sealed, exportable and visible, and it does not move the verdict.
+    #    Whether a signature match SHOULD weigh on a sealed verdict -- and how
+    #    much, given that the adversary picks the bytes -- is an open decision,
+    #    recorded rather than silently answered by a default.
+    #    tests/test_yara_collection.py pins both halves of that claim.
+    "yara_process": {
+        "artifact": "Windows.Detection.Yara.Process",
+        "evidence_type": "malware_static_analysis",
+        "timestamp_field": "ScanTime",
+        "summary_fields": ("Rule", "Tags", "ProcessName", "Pid"),
+        "description": ("YARA matches in process memory (sealed as evidence; "
+                        "carries no verdict weight by design)."),
+        "parameters": {
+            "RuleSet": _P_RULESET,
+        },
+    },
+    "yara_file": {
+        "artifact": "Generic.Detection.Yara.Glob",
+        "evidence_type": "malware_static_analysis",
+        "timestamp_field": "ScanTime",
+        "summary_fields": ("Rule", "Tags", "FullPath"),
+        "description": ("YARA matches in files under a target glob (sealed as "
+                        "evidence; carries no verdict weight by design)."),
+        "parameters": {
+            "RuleSet": _P_RULESET,
+            "TargetGlob": _P_GLOB,
+        },
+    },
 }
+
+# Where committed rulesets live. A RuleSet parameter names a file in here;
+# resolve_ruleset() is the only way a rule file reaches a collection.
+RULES_DIR = Path(__file__).resolve().parent / "yara_rules"
+
+
+def resolve_ruleset(name: str) -> Path:
+    """Resolve a validated RuleSet name to a committed rule file.
+
+    Deny by default: the name must fullmatch _P_RULESET (no separators, so no
+    traversal is expressible), and the resolved path must still sit inside
+    RULES_DIR after resolution. Missing files fail loud rather than scanning
+    with no rules and reporting a clean result.
+    """
+    if not isinstance(name, str) or re.fullmatch(_P_RULESET, name) is None:
+        raise TemplateError(
+            f"invalid ruleset name {name!r}; committed rulesets match "
+            f"{_P_RULESET} and rule TEXT is never accepted")
+    path = (RULES_DIR / f"{name}.yar").resolve()
+    if path.parent != RULES_DIR.resolve():
+        raise TemplateError(f"ruleset {name!r} resolves outside {RULES_DIR}")
+    if not path.is_file():
+        raise TemplateError(
+            f"ruleset {name!r} is not committed at {path}; a scan with no "
+            f"rules would report a clean host it never examined")
+    return path
 
 
 class TemplateError(ValueError):

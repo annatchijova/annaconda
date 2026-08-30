@@ -40,6 +40,14 @@ from tools.velociraptor.vql_templates import TEMPLATES
 # model entirely.)
 _DEFAULT_PARAMS: dict[str, dict] = {
     "process_creation_evtx": {"Channel": "Security"},
+    # The agent picks WHICH hunts run; the ruleset and the scan target are
+    # vetted here and never by the model. The default file target is the
+    # classic staging directory rather than all of C:/Users -- a YARA scan is
+    # paid for on the endpoint under investigation, so the default scope is
+    # the narrow one and widening it is a deliberate act.
+    "yara_process": {"RuleSet": "purple_team_baseline"},
+    "yara_file": {"RuleSet": "purple_team_baseline",
+                  "TargetGlob": "C:/Users/*/AppData/Local/Temp/**"},
 }
 
 _TS_FMT = "%Y-%m-%dT%H:%M:%SZ"

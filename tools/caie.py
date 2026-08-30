@@ -2049,16 +2049,79 @@ class CrossArtifactIncongruenceEngine:
                 })
             return None
 
+        def _pid_of(artifact: "Artifact"):
+            """The process id this artifact belongs to, or None if not asserted.
+
+            M2: the rule's claim is about "the ORIGINATING process", so a pair
+            is only comparable when both sides name the same execution. The id
+            is normalized to int because the same PID arrives as a number from
+            Velociraptor's own rows and as a string from analyzers that parse
+            text logs; a value that is absent, empty or non-numeric is missing
+            data, never a link.
+            """
+            raw = artifact.metadata.get("pid")
+            if raw is None or isinstance(raw, bool):
+                return None
+            try:
+                return int(str(raw).strip())
+            except (TypeError, ValueError):
+                return None
+
+        # M2 (regression: a clean host fabricates a severity-1.0 fracture).
+        # Before M2 the rule compared EVERY network artifact against EVERY
+        # process artifact. That is sound only while a single hand-annotated
+        # pair carries the structured event times, as in the bundled attack
+        # fixture. Feed it real telemetry, where every row reports its own
+        # event time, and any host whose oldest connection predates its newest
+        # process -- which is every host that has been running for a while --
+        # produces "network activity N seconds BEFORE the originating process
+        # was created" about two processes with no relation to each other.
+        #
+        # Two distinct outcomes, deliberately not collapsed:
+        #   - both PIDs known and different -> a DETERMINATE answer ("not the
+        #     same execution"). The pair is not evaluated and nothing is
+        #     recorded: recording it would drive every clean collection to
+        #     ABSTAIN through the temporal_pairs_skipped gate.
+        #   - a PID missing on either side -> the causal link cannot be
+        #     established. That is decision-relevant missing data, so it is
+        #     disclosed via temporal_pairs_skipped, mirroring the M1 doctrine
+        #     for absent event times.
+        if network_artifacts and process_artifacts:
+            for _side, _artifacts in (("network_log_time", network_artifacts),
+                                      ("process_creation_time", process_artifacts)):
+                for _a in _artifacts:
+                    if _pid_of(_a) is not None:
+                        continue
+                    _uk = (_a.source_tool, _side, "pid")
+                    if _uk in _tcv_skip_seen:
+                        continue
+                    _tcv_skip_seen.add(_uk)
+                    self._temporal_pairs_skipped.append({
+                        "source_tool": _a.source_tool,
+                        "field":       "pid",
+                        "value":       repr(_a.metadata.get("pid"))[:64],
+                        "reason":      "unlinkable",
+                        "rule":        "TEMPORAL_CAUSALITY_VIOLATION",
+                    })
+
         for net in network_artifacts:
             net_time_str = net.metadata.get("network_log_time")
             net_time = _parse_ts_tcv(net_time_str, net.source_tool, "network_log_time")
             if net_time is None:
+                continue
+            net_pid = _pid_of(net)
+            if net_pid is None:
                 continue
 
             for proc in process_artifacts:
                 proc_time_str = proc.metadata.get("process_creation_time")
                 proc_time = _parse_ts_tcv(proc_time_str, proc.source_tool, "process_creation_time")
                 if proc_time is None:
+                    continue
+                proc_pid = _pid_of(proc)
+                # Different executions cannot stand in a cause/effect relation,
+                # and an unasserted PID was already disclosed above.
+                if proc_pid is None or proc_pid != net_pid:
                     continue
 
                 # VIOLATION: Network activity before process existed

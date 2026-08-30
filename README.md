@@ -4,13 +4,35 @@
 
 # annaconda
 
-**Live purple-team DFIR with verdicts a court could trust.** annaconda analyzes
-an endpoint as an attack unfolds and seals a reproducible, MITRE-mapped verdict.
-A fleet of Google ADK + Gemini agents works cases **unattended** — choosing what
-to hunt, carrying an investigation's memory across weeks, escalating to a human
-when one is needed — while the deterministic engine keeps the verdict sealed
-*before* any model describes it. Swap the narrator and the verdict, its score,
-and its hash never change.
+## Purple-team DFIR · a multi-agent fleet · real-time endpoint telemetry from Velociraptor
+
+**annaconda works the endpoint while the attack is still unfolding.** It pulls
+live telemetry off the host through Velociraptor's own VQL engine, freezes what
+it collected into a hash-sealed evidence window, and adjudicates a reproducible,
+MITRE-mapped verdict — all *before* any language model is allowed to speak. A
+fleet of Google ADK + Gemini agents works cases **unattended**: choosing what to
+hunt, carrying an investigation's memory across weeks, escalating to a human when
+one is needed. Swap the narrator and the verdict, its score, and its hash never
+change.
+
+The three things it is, at once:
+
+- **Purple team, not post-mortem.** Red runs a technique; annaconda emits a
+  sealed, MITRE-mapped verdict on the telemetry as it lands. Red and blue read
+  one reproducible, tamper-evident account of what happened and whether the
+  detection held — instead of arguing over two write-ups.
+- **A multi-agent fleet with strictly disjoint powers.** A commander tasks six
+  specialists (`agent/fleet.py`) — dispatcher, two hunters, threat-intel,
+  detection-engineer, correlator — plus an investigator and a mentor outside the
+  fleet. Exactly **one** of them can reach the sealed core, no tool belongs to
+  two roles, and a test proves it (`tests/test_fleet.py`). They act, delegate and
+  explain; **none of them decides**.
+- **Real-time telemetry with Velociraptor.** Collection runs through curated VQL
+  templates only — never free-form VQL from a model or a caller — against
+  Velociraptor as an independent AGPLv3 service reached over its own interface,
+  and the window is sealed at the moment of collection. See
+  [Live telemetry](#live-telemetry-how-evidence-gets-in) for exactly how far this
+  is proven today.
 
 > Built for the **All Things Agentic Hackathon** (Google / Gemini).
 > Live: **https://vigia-live-1028999311218.us-central1.run.app**
@@ -34,6 +56,65 @@ verdict:
 
 This is what makes the output defensible: reproducible, auditable, and immune to
 whatever the model happens to say.
+
+## Live telemetry: how evidence gets in
+
+Evidence reaches the engine through Velociraptor, and the path is deliberately
+narrow (`tools/velociraptor/adapter.py`):
+
+1. **Collect.** A hunt names a **pre-committed VQL template**
+   (`tools/velociraptor/vql_templates.py`: processes, network connections,
+   process-creation event logs, scheduled tasks, and YARA matches in process
+   memory or files) and supplies only pattern-validated parameters. Raw ad-hoc
+   VQL never runs, and neither does raw rule text — no free-form instruction
+   from a model or a caller can reach the evidence source. `GET /hunts` lists
+   what a caller may ask for.
+2. **Normalize.** Rows become the artifact shape the core scorer consumes. The
+   adapter assigns **no scores**: it is on the custody path, not the decision
+   path.
+3. **Freeze.** The result is an immutable evidence window whose `window_hash`
+   uses the same canonical-v2 + SHA-256 recipe that seals verdicts, with a
+   custody manifest hashing the raw collected rows. No wall clock enters a hashed
+   payload and artifact ids derive from row content, so the same telemetry seals
+   **bit-for-bit identically** in any process.
+
+The transport that does this (`VelociraptorQueryTransport`) has two modes behind
+one code path: **local**, running VQL against this host, and **remote**, running
+through a Velociraptor server's API (`--api_config`) to reach enrolled clients.
+Prove it end to end on real telemetry, right now:
+
+```bash
+python3 scripts_lib/live_velociraptor_demo.py
+# real processes off THIS host via the Velociraptor binary → sealed window → verdict
+```
+
+`tests/test_velociraptor_live.py` runs the same path in the suite when the
+binary is present and skips — visibly, with a reason — when it is not, so a green
+run never implies a live collection that did not happen.
+
+**Malware detection enters here too — and stops here.** Velociraptor already
+matches YARA rules against process memory and files, so annaconda collects and
+seals those hits rather than reimplementing a scanner. Rules are *named*, never
+supplied: a caller names a committed ruleset and rule text is refused at the
+boundary, because a YARA rule is executable matching logic and accepting one
+would be the free-form instruction this registry exists to keep away from the
+evidence source. A hit is sealed, exported and visible — and it does **not** move
+the verdict, deliberately: the adversary chooses the bytes a signature matches,
+so what a match is worth to a sealed verdict is an open decision, and a test
+pins the current answer so it cannot drift by accident. It can be exercised on
+any Windows host with no malware sample. See
+[docs/YARA_COLLECTION.md](docs/YARA_COLLECTION.md).
+
+**How far this is proven, stated plainly:** the local live path is real and
+exercised; the remote mode is the same code with an `api_config`, but collecting
+from enrolled Windows endpoints needs a Velociraptor server, enrolled clients and
+network reachability — infrastructure we do not have yet, so the **hosted demo
+runs on bundled telemetry** (a benign baseline and a compromised-endpoint
+scenario). The earlier `RestTransport` sketch stays unverified until that lab
+exists, and file-level custody of uploaded raw files is not implemented. Nothing
+in the app claims live collection it did not do: an endpoint that could not be
+observed is recorded as unobserved, never as a host that was looked at and found
+quiet.
 
 ## Judge shortcut
 
@@ -283,13 +364,13 @@ The Cloud Run service account needs `roles/datastore.user` for Firestore.
 
 ### Prove the live evidence path
 
-annaconda can collect from a real Velociraptor, not just fixtures:
-
 ```bash
-python3 scripts_lib/live_velociraptor_demo.py
-# collects real process telemetry from THIS host via the Velociraptor binary,
-# seals it into a window, and adjudicates it
+scripts/setup_velociraptor.sh                      # fetch the binary
+python3 scripts_lib/live_velociraptor_demo.py      # real telemetry → sealed window → verdict
 ```
+
+What this proves, and what it does not, is spelled out under
+[Live telemetry](#live-telemetry-how-evidence-gets-in).
 
 ### Tests
 
@@ -313,11 +394,10 @@ floats, no black-box dependencies in any sealed value.
 
 ## Honest limitations
 
-- The deployed demo runs on bundled telemetry (a benign baseline and a
-  compromised-endpoint scenario). The **live Velociraptor transport is real and
-  proven** (`VelociraptorQueryTransport`), but collecting from remote Windows
-  endpoints needs a Velociraptor server with clients enrolled and network
-  reachability to it — infrastructure, not code.
+- The deployed demo runs on bundled telemetry; the **live Velociraptor transport
+  is real and proven** locally, and reaching remote Windows endpoints is
+  infrastructure, not code — details under
+  [Live telemetry](#live-telemetry-how-evidence-gets-in).
 - Firestore persistence is per-case; the app is a single Cloud Run instance for
   the demo. Multi-instance sharing works through Firestore.
 - An `ABSTAIN` verdict is a first-class, honest outcome, not a failure — a
@@ -332,8 +412,10 @@ floats, no black-box dependencies in any sealed value.
 
 ## Roadmap
 
-Built and deployed: the sealed deterministic core, two ADK agents (investigator
-with a visible decision log, mentor), real attack detection, the ML nominator,
+Built and deployed: the sealed deterministic core, the live Velociraptor
+collection path (curated VQL → sealed window, proven on real host telemetry),
+nine ADK agents (the unattended fleet plus a single-operator investigator with a
+visible decision log and a mentor), real attack detection, the ML nominator,
 per-host Firestore-backed cases with one continuing sealed chain, the
 prompt-injection defense (two Google models, one hash), autonomous sweeps
 (Scheduler → Pub/Sub → Cloud Run), ABSTAIN-as-memory reentry, and a
@@ -354,18 +436,62 @@ nobody watched happen (`tests/test_tracing.py` reads the spans back to prove
 it) — and the **autonomous fleet** — an agentic
 cycle that works cases unattended, with tamper-evident mission memory, a
 per-case schedule it sets itself, and an enterprise catalog that gates every
-delegation by department, data class and region. Next:
+delegation by department, data class and region.
 
-- **A live Velociraptor lab**, so the collection path runs against enrolled
-  Windows endpoints rather than bundled telemetry — infrastructure, not code
-  (the transport is real and proven).
+### Audited
 
 An external red-team (Kimi) audited the build; every finding was verified against
 the live code and the P1/P2 items fixed — including **an atomic Firestore
 transaction around the case write**, so two cycles racing one case can no longer
 overwrite a sealed run (the loser is refused; verified inductively against real
-Firestore). The full audit and fixes are in
-[docs/RED_TEAM_AUDIT_ROUND1_EXTERNAL.md](docs/RED_TEAM_AUDIT_ROUND1_EXTERNAL.md).
+Firestore). A second, architectural round (A-1…A-9) followed, each fix written
+red-first. The full audits and fixes are in
+[docs/RED_TEAM_AUDIT_ROUND1_EXTERNAL.md](docs/RED_TEAM_AUDIT_ROUND1_EXTERNAL.md)
+and [docs/redteam/ROUND2_ARCHITECTURE.md](docs/redteam/ROUND2_ARCHITECTURE.md).
+
+### Still open
+
+Recorded rather than tidied away. Each item is honest in the running system
+today — visible on `/health`, in a `WARN`, or in a queue row — and none of them
+can move a sealed verdict.
+
+- **A live Velociraptor lab.** The collection path should run against enrolled
+  Windows endpoints instead of bundled telemetry. Infrastructure, not code: the
+  transport is real and proven locally, and the remote mode is the same code with
+  an `api_config`. The `RestTransport` sketch stays unverified until then, and
+  file-level custody of uploaded raw files is unimplemented.
+- **An `ABSTAIN` can be resolved by the wrong surface.** A later conclusive
+  verdict clears the open question even when it answers a *different* surface
+  than the one the abstention named. Closing it needs the case store to know
+  which collection answers which gap — information it does not have today. The
+  divergence is surfaced (`supersedes_unresolved` on the queue row) and the
+  dangerous consequence is already closed: while the gap is open the planner
+  cannot stand down. See
+  [docs/redteam/ROUND2_ARCHITECTURE.md](docs/redteam/ROUND2_ARCHITECTURE.md).
+- **The default posture of the public demo is permissive by design.** An
+  unauthenticated caller resolves to `incident-response`, and acknowledging an
+  escalation needs no verified credential (the record says
+  `acknowledged_by_authenticated: false`). Both are product decisions for a demo
+  anyone can open; `VIGIA_REQUIRE_AUTHENTICATED_PRINCIPAL=true` +
+  `VIGIA_EXPECTED_AUDIENCE` make the catalog a real gate, and `/health` reports
+  which posture is live.
+- **v1 stream entries cannot be bound to a host.** Entries sealed before the
+  `host_hash` fix cannot be retro-sealed; the verifiers report this as a `WARN`
+  naming exactly what fell outside scope, never as a silent `PASS`.
+- **What a signature match is worth to a verdict.** YARA hits are collected and
+  sealed but carry no verdict weight (see
+  [docs/YARA_COLLECTION.md](docs/YARA_COLLECTION.md)). Giving them weight means
+  answering what a match means when the adversary chose the bytes, and what a
+  *miss* means — a question the structural fractures do not have. Related: no
+  specialist in `agent/fleet.py` runs the YARA hunts yet, so an unattended cycle
+  never scans; and `injection_technique` still has no honest source in real
+  telemetry, because unbacked executable memory is also what every JIT runtime
+  looks like.
+- **Operational hardening not yet actioned** (red-team round 1): per-client rate
+  limiting with a bounded key map, a reaper for tempdirs and a TTL/LRU for the
+  in-process investigation store, and a Firestore-emulator smoke test for the
+  transactional case write (verified inductively against real Firestore, not by
+  the test double).
 
 ## License & attributions
 
