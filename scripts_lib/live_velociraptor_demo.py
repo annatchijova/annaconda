@@ -25,9 +25,11 @@ if str(REPO_ROOT) not in sys.path:
 from tools.velociraptor.adapter import (  # noqa: E402
     VelociraptorQueryTransport, collect_window, verify_window, window_to_case,
 )
+from tools.velociraptor.release import (  # noqa: E402
+    default_binary_path, host_block,
+)
 
-DEFAULT_BINARY = str(REPO_ROOT / "tools" / "velociraptor"
-                     / "velociraptor-v0.77.1-linux-amd64")
+DEFAULT_BINARY = str(default_binary_path())
 
 # Cross-platform VQL so the live proof runs on this host. The pslist template
 # keys its timestamp on CreateTime, which pslist() returns natively.
@@ -49,7 +51,11 @@ def main() -> int:
     window, reports = collect_window(
         transport,
         case_id="LIVE-DEMO-001", sequence=0, source="velociraptor",
-        host={"client_id": "C.localhost", "hostname": "dev-workstation", "os": "linux"},
+        # Custody, not decoration: the host block is sealed into the window and
+        # travels with the evidence. This said "linux" regardless of the machine
+        # it ran on, so a collection taken on Windows or macOS produced a REAL
+        # sealed window asserting a provenance its own host contradicts.
+        host=host_block(),
         time_start_utc="2026-08-14T00:00:00Z", time_end_utc="2026-08-14T23:59:59Z",
         examiner_id="purple-op-01", requests=[("pslist", {})],
     )

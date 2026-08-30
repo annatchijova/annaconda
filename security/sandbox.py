@@ -34,11 +34,31 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import resource
 import sys
 import warnings
 from pathlib import Path
 from typing import Final
+
+# ``resource`` is POSIX-only. Importing it unconditionally made this module --
+# and therefore every importer of ``security`` -- unimportable on Windows with
+# ModuleNotFoundError. ``security/__init__`` re-exports from here and
+# ``tools/caie.py`` imports ``security``, so the deterministic engine could not
+# be imported at all on a platform this file already claims to support: see the
+# ``_IS_POSIX`` branches below and the ``VIGIA_ENFORCE_POSIX_SANDBOX`` abort,
+# a security fail-safe written FOR Windows that could never run, because it
+# sits forty lines after the import that raised.
+#
+# The predicate is spelled out literally rather than reusing ``_IS_POSIX``,
+# which is defined further down and cannot be referenced before it exists; the
+# two must stay in sync. The symbol is only dereferenced inside
+# ``_make_preexec``, called exclusively from the ``if _IS_POSIX:`` branch of
+# ``sandboxed_execute``, so on Windows the None binding is unreachable rather
+# than a deferred crash -- and the platform's loss of setrlimit is disclosed by
+# the RuntimeWarning below instead of being swallowed.
+if os.name != "nt":
+    import resource
+else:  # pragma: no cover - exercised only on Windows
+    resource = None
 
 
 # ---------------------------------------------------------------------------
