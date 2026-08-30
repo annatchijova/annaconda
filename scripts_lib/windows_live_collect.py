@@ -9,8 +9,11 @@ Two modes, one code path:
 
     python3 scripts_lib/windows_live_collect.py --replay evidence_dump/
         Replay: re-runs the identical pipeline over rows collected earlier
-        (on another machine). The window hash must come out identical to the
-        live run -- that equality is the point of saving the rows.
+        (on another machine) and checks it against the sealed window the live
+        run saved. The window hashes are NOT expected to match -- source, flow
+        ids and manifest are custody, and the custody really did differ. What
+        must match is the evidence: the saved window still verifies against
+        its own seal, and every artifact id re-derives identically.
 
 Window time bounds are derived from the collected rows, never from a wall
 clock, so a replay of the same telemetry reproduces the same seal bit-for-bit.
@@ -67,6 +70,28 @@ WINDOWS_VQL = {
         "SELECT FullPath, Mtime AS MTime, Command FROM glob("
         "globs='C:/Windows/System32/Tasks/**') WHERE NOT IsDir",
 }
+
+# YARA collections need the resolved path of the committed ruleset, so their
+# VQL is built at run time rather than hardcoded above.
+#
+# VERIFY ON WINDOWS: these two are the least certain queries in this file.
+# proc_yara()/yara() argument names and the shape of a hit row are what the
+# first run is meant to establish -- use --show-fields and expect to adjust.
+# ScanTime is projected explicitly because a hit row carries no event time of
+# its own, and normalize_rows drops any row without one.
+def _yara_vql(rules_path: str) -> dict:
+    rules = f"read_file(filename='{rules_path}')"
+    now = "timestamp(epoch=now()).String"
+    return {
+        "Windows.Detection.Yara.Process":
+            "SELECT * FROM foreach(row={SELECT Pid, Name FROM pslist()}, "
+            "query={SELECT Rule, Tags, Pid, Name AS ProcessName, "
+            f"{now} AS ScanTime FROM proc_yara(pid=Pid, rules={rules})" + "})",
+        "Generic.Detection.Yara.Glob":
+            "SELECT FullPath, Rule, Tags, "
+            f"{now} AS ScanTime FROM yara(rules={rules}, "
+            "files={SELECT OSPath FROM glob(globs=GLOBS)})",
+    }
 
 class _Recording:
     """Delegates to a real transport while keeping every raw row it served.
@@ -158,6 +183,13 @@ def main() -> int:
                     help=f"default: {' '.join(DEFAULT_TEMPLATES)}")
     ap.add_argument("--show-fields", action="store_true",
                     help="print the raw field names of the first row per template")
+    ap.add_argument("--ruleset", default="purple_team_baseline",
+                    help="committed YARA ruleset name (tools/velociraptor/yara_rules)")
+    ap.add_argument("--yara-glob", default="C:/Users/**",
+                    help="target glob for the yara_file template")
+    ap.add_argument("--vql-map", metavar="FILE",
+                    help="JSON {artifact: vql} overriding the built-in queries, "
+                         "so the VQL can be corrected without editing this file")
     args = ap.parse_args()
 
     if args.replay:
@@ -167,12 +199,25 @@ def main() -> int:
         if not Path(args.binary).exists():
             print(f"[live] binary not found: {args.binary}")
             return 2
-        transport = _Recording(VelociraptorQueryTransport(args.binary, WINDOWS_VQL))
+        vql = dict(WINDOWS_VQL)
+        if any(t.startswith("yara_") for t in args.templates):
+            from tools.velociraptor.vql_templates import resolve_ruleset
+            rules_path = str(resolve_ruleset(args.ruleset)).replace("\\", "/")
+            vql.update(_yara_vql(rules_path))
+            print(f"[live] YARA ruleset: {rules_path}")
+        if args.vql_map:
+            vql.update(json.loads(Path(args.vql_map).read_text(encoding="utf-8")))
+            print(f"[live] VQL overridden from {args.vql_map}")
+        transport = _Recording(VelociraptorQueryTransport(args.binary, vql))
         print(f"[live] collecting from THIS host via {Path(args.binary).name}")
     else:
         ap.error("give a path to velociraptor.exe, or --replay DIR")
 
-    requests = [(t, {}) for t in args.templates]
+    params = {
+        "yara_process": {"RuleSet": args.ruleset},
+        "yara_file": {"RuleSet": args.ruleset, "TargetGlob": args.yara_glob},
+    }
+    requests = [(t, params.get(t, {})) for t in args.templates]
     try:
         window, reports = collect_window(
             transport, case_id=args.case_id, sequence=0,
