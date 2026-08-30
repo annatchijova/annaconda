@@ -64,10 +64,11 @@ narrow (`tools/velociraptor/adapter.py`):
 
 1. **Collect.** A hunt names a **pre-committed VQL template**
    (`tools/velociraptor/vql_templates.py`: processes, network connections,
-   process-creation event logs, scheduled tasks) and supplies only
-   pattern-validated parameters. Raw ad-hoc VQL never runs — no free-form
-   instruction from a model or a caller can reach the evidence source. `GET
-   /hunts` lists what a caller may ask for.
+   process-creation event logs, scheduled tasks, and YARA matches in process
+   memory or files) and supplies only pattern-validated parameters. Raw ad-hoc
+   VQL never runs, and neither does raw rule text — no free-form instruction
+   from a model or a caller can reach the evidence source. `GET /hunts` lists
+   what a caller may ask for.
 2. **Normalize.** Rows become the artifact shape the core scorer consumes. The
    adapter assigns **no scores**: it is on the custody path, not the decision
    path.
@@ -90,6 +91,19 @@ python3 scripts_lib/live_velociraptor_demo.py
 `tests/test_velociraptor_live.py` runs the same path in the suite when the
 binary is present and skips — visibly, with a reason — when it is not, so a green
 run never implies a live collection that did not happen.
+
+**Malware detection enters here too — and stops here.** Velociraptor already
+matches YARA rules against process memory and files, so annaconda collects and
+seals those hits rather than reimplementing a scanner. Rules are *named*, never
+supplied: a caller names a committed ruleset and rule text is refused at the
+boundary, because a YARA rule is executable matching logic and accepting one
+would be the free-form instruction this registry exists to keep away from the
+evidence source. A hit is sealed, exported and visible — and it does **not** move
+the verdict, deliberately: the adversary chooses the bytes a signature matches,
+so what a match is worth to a sealed verdict is an open decision, and a test
+pins the current answer so it cannot drift by accident. It can be exercised on
+any Windows host with no malware sample. See
+[docs/YARA_COLLECTION.md](docs/YARA_COLLECTION.md).
 
 **How far this is proven, stated plainly:** the local live path is real and
 exercised; the remote mode is the same code with an `api_config`, but collecting
@@ -464,6 +478,15 @@ can move a sealed verdict.
 - **v1 stream entries cannot be bound to a host.** Entries sealed before the
   `host_hash` fix cannot be retro-sealed; the verifiers report this as a `WARN`
   naming exactly what fell outside scope, never as a silent `PASS`.
+- **What a signature match is worth to a verdict.** YARA hits are collected and
+  sealed but carry no verdict weight (see
+  [docs/YARA_COLLECTION.md](docs/YARA_COLLECTION.md)). Giving them weight means
+  answering what a match means when the adversary chose the bytes, and what a
+  *miss* means — a question the structural fractures do not have. Related: no
+  specialist in `agent/fleet.py` runs the YARA hunts yet, so an unattended cycle
+  never scans; and `injection_technique` still has no honest source in real
+  telemetry, because unbacked executable memory is also what every JIT runtime
+  looks like.
 - **Operational hardening not yet actioned** (red-team round 1): per-client rate
   limiting with a bounded key map, a reaper for tempdirs and a TTL/LRU for the
   in-process investigation store, and a Firestore-emulator smoke test for the
