@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-vigia/scripts/run_pipeline.py
+scripts_lib/run_pipeline.py
 
 Adaptador canónico VIGÍA — orquesta Detection → Aggregation → Decision.
 
 Uso:
-    python3 -m vigia.scripts.run_pipeline \\
+    python3 scripts_lib/run_pipeline.py \\
         --input data/test_cases.json \\
         --output outputs/run_a.json \\
         [--negation-enabled]
+
+    (equivalente: python3 -m scripts_lib.run_pipeline ...)
 
 Output por artefacto:
     {artifact_id, text, aggregator, decision, matches}
@@ -31,6 +33,29 @@ from datetime import datetime, timezone
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, List
+
+# Ejecutado como archivo, sys.path[0] es scripts_lib/, no la raíz, así que
+# `from core...` fallaba con ModuleNotFoundError antes de llegar a argparse.
+# Su hermano scripts_lib/windows_live_collect.py ya hace esto; era el único
+# script del directorio que no lo hacía.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+# El informe de este script usa "→" y acentos. En Windows sys.stdout sale en el
+# codepage ANSI (cp1252 acá), y ese print es la ÚLTIMA línea del camino feliz:
+# el pipeline corría entero, atomic_write_text dejaba el JSON en disco, y
+# entonces UnicodeEncodeError mataba el proceso con exit 1. Un CI o un
+# scheduler leía "falló" sobre una corrida que había salido bien y cuyo
+# resultado ya estaba escrito -- la inversión exacta de la degradación honesta.
+#
+# Se declara la codificación del canal en vez de podar los caracteres, que es
+# la misma decisión que tests/test_selftests.py toma para las suites que invoca.
+# errors="replace" para que una consola exótica degrade el glifo y nunca el
+# código de salida.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 # ── Canonicalización explícita (I2 + I7) ─────────────────────────────────
@@ -104,7 +129,14 @@ try:
     from core.decision_layer import decide
 except ImportError as e:
     print(f"[FATAL] Importación fallida: {e}", file=sys.stderr)
-    print("[FATAL] Ejecutar con: PYTHONPATH=$(pwd) python3 -m vigia.scripts.run_pipeline", file=sys.stderr)
+    # Nombraba `vigia.scripts.run_pipeline`: no existe ningún paquete `vigia`
+    # ni un directorio `scripts`, así que el mensaje de auxilio entregaba una
+    # invocación que también falla. Y era inalcanzable de todos modos: el
+    # `from core.canonicalize import ...` de más arriba está fuera de este try
+    # y revienta primero, de modo que este print nunca llegaba a ejecutarse.
+    print("[FATAL] Ejecutar desde la raíz del repo con: "
+          "python3 scripts_lib/run_pipeline.py --input ... --output ...",
+          file=sys.stderr)
     sys.exit(1)
 
 

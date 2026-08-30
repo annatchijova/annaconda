@@ -295,12 +295,29 @@ class SessionPatternMemory:
 
 # ── Detector principal ─────────────────────────────────────────────────────
 
+#: La base de patrones, anclada al módulo y no al directorio de trabajo.
+#:
+#: El default era la ruta RELATIVA "vigia/tools/forensic_patterns.sqlite", con
+#: dos defectos encima: no existe ningún paquete `vigia` en este repo (la base
+#: vive en tools/, versionada), y una ruta relativa se resuelve contra el cwd,
+#: así que aun con el prefijo correcto solo habría funcionado invocando desde
+#: la raíz. El resultado era que la etapa de Detection no podía cargar sus
+#: patrones nunca, con el archivo presente en el árbol.
+#:
+#: Falla honesta, eso sí: _load_patterns levanta RuntimeError en vez de
+#: devolver un detector vacío, y los llamadores lo convierten en ABSTAIN en
+#: lugar de un NOISE de apariencia limpia.
+DEFAULT_PATTERN_DB = str(
+    Path(__file__).resolve().parent.parent / "tools" / "forensic_patterns.sqlite"
+)
+
+
 class SemioticDetectorV2:
     """
     Detector semiótico v2.2 — final consolidado.
     """
 
-    def __init__(self, db_path: str = "vigia/tools/forensic_patterns.sqlite",
+    def __init__(self, db_path: str = DEFAULT_PATTERN_DB,
                  negation_enabled: bool = True):
         self.db_path = db_path
         self.negation_handler_enabled = negation_enabled
@@ -686,7 +703,7 @@ class SemioticDetectorV2:
 # ── API de conveniencia ───────────────────────────────────────────────────
 
 def analyze_artifact(text: str, artifact_id: str, timestamp: str,
-                     db_path: str = "vigia/tools/forensic_patterns.sqlite",
+                     db_path: str = DEFAULT_PATTERN_DB,
                      negation_enabled: bool = True) -> Dict[str, Any]:
     """Entry point canónico. negation_enabled activa/desactiva el Negation Handler."""
     detector = SemioticDetectorV2(db_path=db_path, negation_enabled=negation_enabled)
