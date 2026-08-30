@@ -825,7 +825,11 @@ def _vigia_score(case: dict) -> dict:
     _temporal_pairs_skipped: list = []  # P1: TCV pairs CAIE could not evaluate
     _caie_artifacts_rejected: list = []  # H-10 / S-2: artifacts CAIE dropped
     try:
-        from tools.caie import CrossArtifactIncongruenceEngine, Artifact as CaieArtifact
+        from tools.caie import (
+            CrossArtifactIncongruenceEngine, Artifact as CaieArtifact,
+            _MAX_ARTIFACTS as _CAIE_MAX_ARTIFACTS,
+            _VALID_EVIDENCE_TYPES as _CAIE_VALID_TYPES,
+        )
         _valid_fields = {
             "source_tool", "evidence_type", "raw_score", "description",
             "metadata", "provenance_chain", "base_trust", "timestamp",
@@ -857,9 +861,32 @@ def _vigia_score(case: dict) -> dict:
                 })
                 continue
             if not _added:
+                # add_artifact() returns False for two facts that mean opposite
+                # things, and reporting them under one label made a real Windows
+                # collection unreadable. An unknown evidence_type is by design
+                # (B-067): that class is not analysed, on purpose, and the
+                # verdict is still about everything the engine was meant to see.
+                # The anti-flooding limit is the reverse -- the type IS analysed,
+                # the artifact was simply past the cut, so the verdict is about
+                # a positional subset of the evidence and the reader cannot tell
+                # from a merged label which of the two happened.
+                #
+                # Observed on real telemetry: an idle Windows 11 host yields
+                # 1683 artifacts (netstat alone is 963), so 683 were dropped by
+                # the limit -- every memory_process and every filesystem_artifact
+                # among them. Same distinction the collection boundary already
+                # makes between "absent" and "unreadable".
+                _et = str(art.get("evidence_type", ""))
+                if _et not in _CAIE_VALID_TYPES:
+                    _why = f"evidence_type {_et!r} not analysed (whitelist, by design)"
+                else:
+                    _why = (f"past the {_CAIE_MAX_ARTIFACTS}-artifact anti-flooding "
+                            "limit: a valid, analysable artifact excluded by its "
+                            "position in the collection, not by its content")
                 _caie_artifacts_rejected.append({
                     "artifact_id": str(art.get("artifact_id", "unknown")),
-                    "reason": "rejected_by_add_artifact (whitelist/limit)",
+                    "evidence_type": _et,
+                    "reason": _why,
                 })
         raw_fractures = engine.detect_fractures()
         # P1 (evidence integrity): temporal pairs CAIE skipped because a required
