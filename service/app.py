@@ -1210,6 +1210,24 @@ async def consult(req: ConsultRequest) -> dict:
     # model-touching route so a caller cannot burn the quota (red-team R2-1).
     if not _rate_ok("consult"):
         raise HTTPException(status_code=429, detail="rate limited")
+    # Every other model-touching route asks first; this one did not, and without
+    # credentials it reached google-genai and surfaced as an opaque 500 with a
+    # ValueError in the log. The consult page is shipped UI, so anyone running
+    # the service without a key met a broken panel rather than a stated reason.
+    #
+    # Unlike /injection-demo, /consult has no deterministic result to fall back
+    # to -- a consultation without a model is nothing -- so it refuses. What it
+    # must not do is refuse anonymously: 503 with the cause is the same
+    # vocabulary /health already uses for its unavailable components, and
+    # model_reachable() is the same predicate this file consults on line 254.
+    if not autonomy.model_reachable():
+        raise HTTPException(
+            status_code=503,
+            detail=("consult is unavailable: no model is reachable. Set "
+                    "GEMINI_API_KEY or GOOGLE_API_KEY (or GOOGLE_CLOUD_PROJECT "
+                    "with GOOGLE_GENAI_USE_VERTEXAI=TRUE). The sealed verdict "
+                    "path does not need one and is unaffected."),
+        )
     from google.genai import types
     runner = _get_consult_runner()
     # Bound the session id a caller controls, so it cannot be used to grow
