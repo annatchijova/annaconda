@@ -286,8 +286,19 @@
           <div class="node spec"><h4>Windows / Persistence hunters</h4><p>Collect running-state and persistence telemetry — each its own sealed window.</p></div>
           <div class="node spec"><h4>Threat-intel · Detection-engineer</h4><p>VirusTotal / MISP enrichment; Sigma rule drafts. Read-only context.</p></div>
         </div>
-        <div class="readonly">correlator ── the one role that may reach the core ──▶ adjudicate()</div>
-        <span style="float:right; margin-top:-26px; font-family:var(--mono); font-size:11px; color:var(--faint);">disjoint tool contracts · sealed registry (agent = hash of its tools) · catalog gate</span>
+        <!-- Fila flex con gap en vez de float + margin-top negativo. El caption
+             se posicionaba de forma INDEPENDIENTE del ancho del badge, así que
+             nada reservaba espacio entre los dos: la separación era la que
+             sobrara. Con una fuente más ancha el badge invadía el caption y le
+             tapaba la primera letra — visual/architecture.png, el diagrama que
+             el README embebe, dice "isjoint tool contracts". Justo la propiedad
+             que hace defendible la flota. Verificado midiendo las cajas: se
+             pisaban 103px a 900px de ancho. Ahora el gap es explícito y bajo
+             presión envuelve en vez de solaparse. -->
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap;">
+          <div class="readonly">correlator ── the one role that may reach the core ──▶ adjudicate()</div>
+          <span style="font-family:var(--mono); font-size:11px; color:var(--faint);">disjoint tool contracts · sealed registry (agent = hash of its tools) · catalog gate</span>
+        </div>
       </div>
 
       <div class="connector"><span>the model receives a compressed, read-only summary — it cannot supply a score, a state, or a hash</span></div>
