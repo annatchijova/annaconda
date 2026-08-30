@@ -2067,6 +2067,17 @@ class CrossArtifactIncongruenceEngine:
             except (TypeError, ValueError):
                 return None
 
+        # PID 0 is not a process on any platform this collects from: Windows
+        # netstat reports it for a socket with no owning process (observed:
+        # 59% of a real collection, all TIME_WAIT), and on Linux it is the
+        # scheduler. It is a sentinel meaning "no owner", so it is a
+        # DETERMINATE answer -- these rows cannot stand in a causal relation to
+        # anything -- and not the missing data an absent pid would be. Treating
+        # it as an ordinary id would let hundreds of unrelated sockets match
+        # each other the moment somebody derives the structured event times,
+        # which is exactly the work still pending.
+        _NO_OWNING_PROCESS = 0
+
         # M2 (regression: a clean host fabricates a severity-1.0 fracture).
         # Before M2 the rule compared EVERY network artifact against EVERY
         # process artifact. That is sound only while a single hand-annotated
@@ -2090,6 +2101,10 @@ class CrossArtifactIncongruenceEngine:
             for _side, _artifacts in (("network_log_time", network_artifacts),
                                       ("process_creation_time", process_artifacts)):
                 for _a in _artifacts:
+                    # Only an ABSENT pid is a gap. A pid of 0 parses fine and
+                    # is therefore not disclosed here: "no owning process" is
+                    # an answer, and disclosing it would push every clean
+                    # collection to ABSTAIN through the skipped-pairs gate.
                     if _pid_of(_a) is not None:
                         continue
                     _uk = (_a.source_tool, _side, "pid")
@@ -2110,7 +2125,7 @@ class CrossArtifactIncongruenceEngine:
             if net_time is None:
                 continue
             net_pid = _pid_of(net)
-            if net_pid is None:
+            if net_pid is None or net_pid == _NO_OWNING_PROCESS:
                 continue
 
             for proc in process_artifacts:
@@ -2121,7 +2136,8 @@ class CrossArtifactIncongruenceEngine:
                 proc_pid = _pid_of(proc)
                 # Different executions cannot stand in a cause/effect relation,
                 # and an unasserted PID was already disclosed above.
-                if proc_pid is None or proc_pid != net_pid:
+                if (proc_pid is None or proc_pid == _NO_OWNING_PROCESS
+                        or proc_pid != net_pid):
                     continue
 
                 # VIOLATION: Network activity before process existed

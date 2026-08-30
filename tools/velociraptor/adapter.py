@@ -29,6 +29,7 @@ import json
 import re
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Optional, Protocol
 
@@ -53,6 +54,87 @@ _ENGINE_METADATA_FIELDS = (
     "status",                 # collection/analysis state (intake-abstain gate)
     "analysis_status",        # PENDING -> the honest verdict is ABSTAIN
 )
+
+
+# Sentinel epochs that mean "this row carries no event time", not a time.
+# Windows FILETIME zero surfaces as 1601-01-01 (observed: 59% of a real
+# netstat collection -- TIME_WAIT sockets with no owning process), and Unix
+# epoch zero as 1970-01-01. Both are syntactically valid ISO-8601 and both are
+# lies about when something happened.
+#
+# The deterministic engine already refuses these inside its temporal-causality
+# rule (tools/caie.py, guard R3-1, which names the FILETIME 1601 case by hand).
+# That guard sits in ONE consumer, so every other consumer of the same
+# timestamps had to rediscover the problem -- and one did: the sealed window's
+# own time bounds took the minimum over all artifacts and adopted 1601 as the
+# start of the collection, making the window assert temporal coverage of four
+# centuries it never had. Custody claims belong at the boundary, so the
+# predicate lives here, where evidence enters.
+PLAUSIBLE_EVENT_TIME_MIN = datetime(2000, 1, 1, tzinfo=timezone.utc)
+PLAUSIBLE_EVENT_TIME_MAX = datetime(2038, 1, 19, 3, 14, 7, tzinfo=timezone.utc)
+
+
+def is_plausible_event_time(timestamp) -> bool:
+    """True when ``timestamp`` can be read as a real event time.
+
+    Deliberately narrow: this answers "may this value be used as a claim about
+    when something happened", not "is this row worth keeping". A TIME_WAIT
+    socket with no recorded time is still evidence that the socket exists; it
+    just cannot date anything.
+    """
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        return False
+    try:
+        parsed = datetime.fromisoformat(timestamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return PLAUSIBLE_EVENT_TIME_MIN <= parsed < PLAUSIBLE_EVENT_TIME_MAX
+
+
+def canonical_event_time(value) -> tuple[Optional[str], str]:
+    """``(canonical ISO-8601 string, reason)``; the string is None when unusable.
+
+    The boundary used to accept a declared event time only when it was already
+    a non-empty ``str``. That is a type check on the carrier, not a reading of
+    the value, and it silently cost real evidence: a live Windows collection
+    lost ALL 48 of its process-creation events (Event ID 4688) because
+    ``parse_evtx()`` returns ``System.TimeCreated.SystemTime`` as a float epoch
+    while ``pslist()`` returns ``CreateTime`` as an ISO string. Same collector,
+    two representations of a time, one accepted -- and the rejected one is the
+    only source of real process-creation times in the whole template set.
+
+    A numeric epoch is therefore converted here, at the boundary, which is what
+    normalization is for. No float is sealed and no float arithmetic enters the
+    decision path: the conversion happens BEFORE the window is built and what
+    gets canonicalized and hashed is the resulting string, deterministically
+    derived from the same input on any machine.
+
+    Seconds-versus-milliseconds cannot be told apart from the number alone, so
+    the interpretation is checked instead of assumed: a converted value that
+    lands outside the plausible forensic window is reported unusable rather
+    than recorded. A millisecond epoch read as seconds falls in 1970 and is
+    caught by exactly that test.
+
+    Strings pass through untouched, including sentinel epochs. That asymmetry
+    is deliberate: a string is a claim the collector already committed to and
+    we record it as given (the window's own bounds exclude sentinels from the
+    coverage it declares), whereas a number forces US to choose a reading, and
+    an implausible result means our reading is not safe to record.
+    """
+    if value is None:
+        return None, "absent"
+    if isinstance(value, str):
+        return (value, "ok") if value.strip() else (None, "absent")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None, "unusable"
+    try:
+        converted = datetime.fromtimestamp(value, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None, "unusable"
+    text = converted.isoformat().replace("+00:00", "Z")
+    return (text, "ok") if is_plausible_event_time(text) else (None, "unusable")
 
 
 def _sha256_canonical(obj) -> str:
@@ -322,13 +404,21 @@ def normalize_rows(template_id: str, rows: Iterable[dict],
     ts_field = template["timestamp_field"]
     artifacts = {}
     dropped_no_timestamp = 0
+    dropped_unusable_timestamp = 0
     duplicates = 0
     for row in rows:
         if not isinstance(row, dict):
             raise AdapterError(f"row must be a dict, got {type(row).__name__}")
-        timestamp = row.get(ts_field)
-        if not isinstance(timestamp, str) or not timestamp:
-            dropped_no_timestamp += 1
+        timestamp, _why = canonical_event_time(row.get(ts_field))
+        if timestamp is None:
+            # "The field was not there" and "the field was there and could not
+            # be read" are different facts about the collection, and reporting
+            # both as "no timestamp" is what turned a one-line type mismatch
+            # into a forensic dig. Counted apart so the report names which.
+            if _why == "absent":
+                dropped_no_timestamp += 1
+            else:
+                dropped_unusable_timestamp += 1
             continue
         row_sha256 = _sha256_canonical(row)
         artifact_id = f"{template_id}-{row_sha256[:16]}"
@@ -405,9 +495,11 @@ def normalize_rows(template_id: str, rows: Iterable[dict],
         }
     report = {
         "template_id": template_id,
-        "rows_in": dropped_no_timestamp + duplicates + len(artifacts),
+        "rows_in": (dropped_no_timestamp + dropped_unusable_timestamp
+                    + duplicates + len(artifacts)),
         "artifacts_out": len(artifacts),
         "dropped_no_timestamp": dropped_no_timestamp,
+        "dropped_unusable_timestamp": dropped_unusable_timestamp,
         "deduplicated": duplicates,
         "custody": "present" if custody is not None else
                    "absent — CAIE will degrade base_trust, audited",

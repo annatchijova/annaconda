@@ -304,3 +304,109 @@ def test_boundary_rejects_bad_inputs():
         build_evidence_window(**{**good, "source": "live_feed"})
     with pytest.raises(AdapterError):
         build_evidence_window(**{**good, "host": {"client_id": "C.1"}})
+
+
+# --------------------------------------------------------------------------
+# Sentinel epochs at the custody boundary. Found in real Windows telemetry:
+# 59% of a netstat collection stamped 1601-01-01 (FILETIME zero), which the
+# sealed window then adopted as the start of its coverage.
+# --------------------------------------------------------------------------
+
+def test_sentinel_epochs_are_not_event_times():
+    from tools.velociraptor.adapter import is_plausible_event_time
+    assert not is_plausible_event_time("1601-01-01T00:00:00Z"), "Windows FILETIME zero"
+    assert not is_plausible_event_time("1970-01-01T00:00:00Z"), "Unix epoch zero"
+    assert not is_plausible_event_time("2099-01-01T00:00:00Z"), "implausible future"
+    for junk in ("", "   ", None, 0, "not-a-date"):
+        assert not is_plausible_event_time(junk)
+
+
+def test_real_collection_times_are_event_times():
+    from tools.velociraptor.adapter import is_plausible_event_time
+    assert is_plausible_event_time("2026-08-30T15:26:10Z")
+    assert is_plausible_event_time("2026-08-30T15:26:10+00:00")
+    assert is_plausible_event_time("2026-08-30T15:26:10")  # naive, assumed UTC
+
+
+def test_window_bounds_exclude_sentinels_but_keep_the_artifacts():
+    """The sealed window must not claim coverage it never observed.
+
+    Shaped after the real collection: hundreds of ownerless TIME_WAIT sockets
+    carrying FILETIME zero, plus a handful of genuinely dated rows.
+    """
+    from scripts_lib.windows_live_collect import _bounds
+    artifacts = [{"timestamp": "1601-01-01T00:00:00Z"} for _ in range(576)]
+    artifacts += [{"timestamp": "2025-12-16T10:18:00Z"},
+                  {"timestamp": "2026-08-30T15:26:10Z"}]
+    start, end, excluded = _bounds(artifacts)
+    assert start == "2025-12-16T10:18:00Z", "the sentinel became the window start"
+    assert end == "2026-08-30T15:26:10Z"
+    assert excluded == 576, "the exclusions must be counted, not silently dropped"
+
+
+def test_bounds_with_nothing_datable_say_so_rather_than_inventing_a_span():
+    from scripts_lib.windows_live_collect import _bounds
+    start, end, excluded = _bounds([{"timestamp": "1601-01-01T00:00:00Z"}] * 3)
+    assert start == end, "a span was invented out of rejected sentinels"
+    assert excluded == 3
+
+
+# --------------------------------------------------------------------------
+# Numeric event times. Observed in real Windows telemetry: parse_evtx()
+# returns System.TimeCreated.SystemTime as a float epoch, so all 48 process-
+# creation events (Event ID 4688) were dropped as "no timestamp" while the
+# field was present and correctly named.
+# --------------------------------------------------------------------------
+
+REAL_EVTX_EPOCH = 1787953001.2830255  # taken from the live collection
+
+
+def test_a_float_epoch_is_read_rather_than_rejected_for_its_type():
+    from tools.velociraptor.adapter import canonical_event_time
+    text, why = canonical_event_time(REAL_EVTX_EPOCH)
+    assert why == "ok"
+    assert text.startswith("2026-08-28T21:36:41"), text
+    assert text.endswith("Z"), "must be canonical UTC, not an offset"
+
+
+def test_the_conversion_is_deterministic():
+    """What gets sealed is the string, so it must not vary between runs."""
+    from tools.velociraptor.adapter import canonical_event_time
+    assert (canonical_event_time(REAL_EVTX_EPOCH)
+            == canonical_event_time(REAL_EVTX_EPOCH))
+
+
+def test_a_millisecond_epoch_is_refused_rather_than_misread():
+    """Seconds and milliseconds are indistinguishable from the number alone,
+    so the interpretation is checked: read as seconds a ms epoch lands in
+    1970, and an implausible reading must not be recorded as a fact."""
+    from tools.velociraptor.adapter import canonical_event_time
+    text, why = canonical_event_time(int(REAL_EVTX_EPOCH * 1000))
+    assert text is None and why == "unusable"
+
+
+def test_absent_and_unreadable_are_counted_apart():
+    """Reporting both as "no timestamp" is what turned a type mismatch into a
+    forensic dig: the field was there, named right, and readable in principle."""
+    from tools.velociraptor.adapter import normalize_rows
+    rows = [
+        {"EventID": 4688, "EventTime": REAL_EVTX_EPOCH, "Computer": "WIN"},
+        {"EventID": 4688, "EventTime": 99999999999999, "Computer": "WIN"},
+        {"EventID": 4688, "Computer": "WIN"},
+    ]
+    artifacts, report = normalize_rows("process_creation_evtx", rows)
+    assert report["artifacts_out"] == 1, "the readable float row did not enter"
+    assert report["dropped_no_timestamp"] == 1
+    assert report["dropped_unusable_timestamp"] == 1
+    assert report["rows_in"] == 3, "every row must be accounted for"
+
+
+def test_string_timestamps_are_untouched_including_sentinels():
+    """A string is a claim the collector already committed to. Dropping
+    sentinel rows here would discard evidence that a socket existed; the
+    window's declared bounds exclude them instead."""
+    from tools.velociraptor.adapter import canonical_event_time
+    assert canonical_event_time("1601-01-01T00:00:00Z") == (
+        "1601-01-01T00:00:00Z", "ok")
+    assert canonical_event_time("2026-08-30T15:26:10Z") == (
+        "2026-08-30T15:26:10Z", "ok")

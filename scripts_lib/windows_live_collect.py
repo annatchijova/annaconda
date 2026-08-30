@@ -37,8 +37,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.velociraptor.adapter import (  # noqa: E402
-    MockTransport, VelociraptorQueryTransport, collect_window, verify_window,
-    window_to_case,
+    MockTransport, VelociraptorQueryTransport, collect_window,
+    is_plausible_event_time, verify_window, window_to_case,
 )
 from tools.velociraptor.release import host_block  # noqa: E402
 from tools.velociraptor.vql_templates import TEMPLATES  # noqa: E402
@@ -124,13 +124,27 @@ class _Recording:
 DEFAULT_TEMPLATES = ("pslist", "netstat", "process_creation_evtx", "scheduled_tasks")
 
 
-def _bounds(artifacts: list) -> tuple[str, str]:
+def _bounds(artifacts: list) -> tuple[str, str, int]:
     """Window bounds from the evidence itself -- no clock, so replay reseals
-    to the same hash. Falls back to a stated placeholder on empty collection."""
-    stamps = sorted(a["timestamp"] for a in artifacts if a.get("timestamp"))
-    if not stamps:
-        return "1970-01-01T00:00:00Z", "1970-01-01T00:00:00Z"
-    return stamps[0], stamps[-1]
+    to the same hash.
+
+    Sentinel timestamps are excluded. A real collection from this host had 59%
+    of its network rows stamped 1601-01-01 (Windows FILETIME zero: TIME_WAIT
+    sockets with no owning process), and taking the plain minimum made the
+    SEALED window declare it covered four centuries it never observed. The
+    artifacts are kept -- a socket with no recorded time is still evidence the
+    socket existed -- but a value that cannot date anything does not get to
+    define the window's temporal claim. Returns the count of exclusions so the
+    caller can state it rather than quietly narrowing the window.
+    """
+    usable = sorted(a["timestamp"] for a in artifacts
+                    if is_plausible_event_time(a.get("timestamp")))
+    excluded = len(artifacts) - len(usable)
+    if not usable:
+        # No artifact can date anything: say so with a sentinel of our own
+        # rather than inventing a span out of the sentinels we just rejected.
+        return "1970-01-01T00:00:00Z", "1970-01-01T00:00:00Z", excluded
+    return usable[0], usable[-1], excluded
 
 
 def _check_against_live(dump_dir: Path, replayed: dict) -> int:
@@ -195,7 +209,13 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.replay:
-        transport = MockTransport(args.replay)
+        # Wrapped exactly like the live path so --show-fields works on a dump
+        # too. Unwrapped, rows_by_artifact stayed empty on replay and the flag
+        # fell back to listing surviving artifacts -- which omits any template
+        # that dropped ALL of its rows, the one case where you most need to see
+        # its fields. The dump is only written when not replaying, so recording
+        # here overwrites nothing.
+        transport = _Recording(MockTransport(args.replay))
         print(f"[replay] rows from {args.replay}")
     elif args.binary:
         if not Path(args.binary).exists():
@@ -255,7 +275,7 @@ def main() -> int:
 
     # Reseal over evidence-derived bounds so live and replay agree.
     from tools.velociraptor.adapter import build_evidence_window
-    start, end = _bounds(window["artifacts"])
+    start, end, undatable = _bounds(window["artifacts"])
     window = build_evidence_window(
         case_id=window["case_id"], sequence=window["sequence"],
         source=window["source"], host=window["host"],
@@ -266,28 +286,35 @@ def main() -> int:
 
     print("\n--- what each template actually yielded ---")
     for rep in reports:
-        flag = "" if rep["dropped_no_timestamp"] == 0 else "   <-- LOOK HERE"
+        unusable = rep.get("dropped_unusable_timestamp", 0)
+        lost = rep["dropped_no_timestamp"] + unusable
+        flag = "" if lost == 0 else "   <-- LOOK HERE"
         print(f"  {rep['template_id']:<22} rows_in={rep['rows_in']:<5} "
               f"artifacts={rep['artifacts_out']:<5} "
-              f"dropped_no_timestamp={rep['dropped_no_timestamp']:<5} "
+              f"no_timestamp={rep['dropped_no_timestamp']:<5} "
+              f"unreadable_timestamp={unusable:<5} "
               f"dedup={rep['deduplicated']}{flag}")
 
     if args.show_fields:
-        print("\n--- raw field names Velociraptor returned (first row each) ---")
+        # Names AND types. Printing only names hid the very defect this flag
+        # exists to surface: the field was present and correctly named, and the
+        # rows were dropped because its TYPE was a float epoch rather than a
+        # string. The type was the whole finding and the one thing not shown.
+        print("\n--- raw field names and types Velociraptor returned "
+              "(first row each) ---")
         recorded = getattr(transport, "rows_by_artifact", {})
         for artifact, rows in sorted(recorded.items()):
             if rows:
-                print(f"  {artifact}: {sorted(rows[0])}")
-        seen = set()
-        for art in window["artifacts"]:
-            tid = art["metadata"]["vql_template"]
-            if tid in seen:
-                continue
-            seen.add(tid)
-            print(f"  {tid}: {sorted(art['metadata']['row'])}")
+                shape = ", ".join(f"{k}: {type(rows[0][k]).__name__}"
+                                  for k in sorted(rows[0]))
+                print(f"  {artifact}: {{{shape}}}")
 
     print(f"\n[window] {window['window_id']}  artifacts={len(window['artifacts'])}  "
           f"bounds={start} .. {end}")
+    if undatable:
+        print(f"[window] {undatable} artifact(s) carry no usable event time "
+              "(sentinel epoch) and were excluded from the bounds -- they are "
+              "still sealed as evidence, they just cannot date anything")
     print(f"[window] window_hash={window['window_hash']}")
     print(f"[window] verifies: {verify_window(window)}")
 
