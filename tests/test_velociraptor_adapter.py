@@ -349,3 +349,64 @@ def test_bounds_with_nothing_datable_say_so_rather_than_inventing_a_span():
     start, end, excluded = _bounds([{"timestamp": "1601-01-01T00:00:00Z"}] * 3)
     assert start == end, "a span was invented out of rejected sentinels"
     assert excluded == 3
+
+
+# --------------------------------------------------------------------------
+# Numeric event times. Observed in real Windows telemetry: parse_evtx()
+# returns System.TimeCreated.SystemTime as a float epoch, so all 48 process-
+# creation events (Event ID 4688) were dropped as "no timestamp" while the
+# field was present and correctly named.
+# --------------------------------------------------------------------------
+
+REAL_EVTX_EPOCH = 1787953001.2830255  # taken from the live collection
+
+
+def test_a_float_epoch_is_read_rather_than_rejected_for_its_type():
+    from tools.velociraptor.adapter import canonical_event_time
+    text, why = canonical_event_time(REAL_EVTX_EPOCH)
+    assert why == "ok"
+    assert text.startswith("2026-08-28T21:36:41"), text
+    assert text.endswith("Z"), "must be canonical UTC, not an offset"
+
+
+def test_the_conversion_is_deterministic():
+    """What gets sealed is the string, so it must not vary between runs."""
+    from tools.velociraptor.adapter import canonical_event_time
+    assert (canonical_event_time(REAL_EVTX_EPOCH)
+            == canonical_event_time(REAL_EVTX_EPOCH))
+
+
+def test_a_millisecond_epoch_is_refused_rather_than_misread():
+    """Seconds and milliseconds are indistinguishable from the number alone,
+    so the interpretation is checked: read as seconds a ms epoch lands in
+    1970, and an implausible reading must not be recorded as a fact."""
+    from tools.velociraptor.adapter import canonical_event_time
+    text, why = canonical_event_time(int(REAL_EVTX_EPOCH * 1000))
+    assert text is None and why == "unusable"
+
+
+def test_absent_and_unreadable_are_counted_apart():
+    """Reporting both as "no timestamp" is what turned a type mismatch into a
+    forensic dig: the field was there, named right, and readable in principle."""
+    from tools.velociraptor.adapter import normalize_rows
+    rows = [
+        {"EventID": 4688, "EventTime": REAL_EVTX_EPOCH, "Computer": "WIN"},
+        {"EventID": 4688, "EventTime": 99999999999999, "Computer": "WIN"},
+        {"EventID": 4688, "Computer": "WIN"},
+    ]
+    artifacts, report = normalize_rows("process_creation_evtx", rows)
+    assert report["artifacts_out"] == 1, "the readable float row did not enter"
+    assert report["dropped_no_timestamp"] == 1
+    assert report["dropped_unusable_timestamp"] == 1
+    assert report["rows_in"] == 3, "every row must be accounted for"
+
+
+def test_string_timestamps_are_untouched_including_sentinels():
+    """A string is a claim the collector already committed to. Dropping
+    sentinel rows here would discard evidence that a socket existed; the
+    window's declared bounds exclude them instead."""
+    from tools.velociraptor.adapter import canonical_event_time
+    assert canonical_event_time("1601-01-01T00:00:00Z") == (
+        "1601-01-01T00:00:00Z", "ok")
+    assert canonical_event_time("2026-08-30T15:26:10Z") == (
+        "2026-08-30T15:26:10Z", "ok")

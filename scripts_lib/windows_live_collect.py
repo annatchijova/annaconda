@@ -209,7 +209,13 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.replay:
-        transport = MockTransport(args.replay)
+        # Wrapped exactly like the live path so --show-fields works on a dump
+        # too. Unwrapped, rows_by_artifact stayed empty on replay and the flag
+        # fell back to listing surviving artifacts -- which omits any template
+        # that dropped ALL of its rows, the one case where you most need to see
+        # its fields. The dump is only written when not replaying, so recording
+        # here overwrites nothing.
+        transport = _Recording(MockTransport(args.replay))
         print(f"[replay] rows from {args.replay}")
     elif args.binary:
         if not Path(args.binary).exists():
@@ -280,25 +286,28 @@ def main() -> int:
 
     print("\n--- what each template actually yielded ---")
     for rep in reports:
-        flag = "" if rep["dropped_no_timestamp"] == 0 else "   <-- LOOK HERE"
+        unusable = rep.get("dropped_unusable_timestamp", 0)
+        lost = rep["dropped_no_timestamp"] + unusable
+        flag = "" if lost == 0 else "   <-- LOOK HERE"
         print(f"  {rep['template_id']:<22} rows_in={rep['rows_in']:<5} "
               f"artifacts={rep['artifacts_out']:<5} "
-              f"dropped_no_timestamp={rep['dropped_no_timestamp']:<5} "
+              f"no_timestamp={rep['dropped_no_timestamp']:<5} "
+              f"unreadable_timestamp={unusable:<5} "
               f"dedup={rep['deduplicated']}{flag}")
 
     if args.show_fields:
-        print("\n--- raw field names Velociraptor returned (first row each) ---")
+        # Names AND types. Printing only names hid the very defect this flag
+        # exists to surface: the field was present and correctly named, and the
+        # rows were dropped because its TYPE was a float epoch rather than a
+        # string. The type was the whole finding and the one thing not shown.
+        print("\n--- raw field names and types Velociraptor returned "
+              "(first row each) ---")
         recorded = getattr(transport, "rows_by_artifact", {})
         for artifact, rows in sorted(recorded.items()):
             if rows:
-                print(f"  {artifact}: {sorted(rows[0])}")
-        seen = set()
-        for art in window["artifacts"]:
-            tid = art["metadata"]["vql_template"]
-            if tid in seen:
-                continue
-            seen.add(tid)
-            print(f"  {tid}: {sorted(art['metadata']['row'])}")
+                shape = ", ".join(f"{k}: {type(rows[0][k]).__name__}"
+                                  for k in sorted(rows[0]))
+                print(f"  {artifact}: {{{shape}}}")
 
     print(f"\n[window] {window['window_id']}  artifacts={len(window['artifacts'])}  "
           f"bounds={start} .. {end}")
