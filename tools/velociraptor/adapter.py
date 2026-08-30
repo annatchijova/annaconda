@@ -365,6 +365,17 @@ def normalize_rows(template_id: str, rows: Iterable[dict],
         for field in _ENGINE_METADATA_FIELDS:
             if field in row and row[field] not in ("", None):
                 metadata[field] = row[field]
+        # Velociraptor names the process id "Pid"; the engine reads "pid".
+        # Surfacing it under the name the engine reads is normalization -- the
+        # tool already recorded the value -- and it is load-bearing: the
+        # temporal-causality rule uses the pid to tell one execution from
+        # another, and an artifact without it is treated as an unevaluable
+        # pair rather than a comparable one.
+        if "pid" not in metadata:
+            for alias in ("Pid", "PID", "ProcessId"):
+                if row.get(alias) not in ("", None):
+                    metadata["pid"] = row[alias]
+                    break
         artifacts[artifact_id] = {
             "artifact_id": artifact_id,
             "evidence_type": template["evidence_type"],
