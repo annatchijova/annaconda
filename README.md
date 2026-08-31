@@ -24,6 +24,21 @@ verdict, its score, and its hash never change. And when the evidence does not
 support a conclusion, it says so: a defensible *"I can't conclude"* beats a
 confident wrong answer.
 
+## Proof it runs on Google Cloud
+
+Deployed on **Cloud Run**, sealed on **Vertex AI (Gemini 3.5)**, and driven
+autonomously by **Cloud Scheduler** — live in the Google Cloud Console, not a
+mockup.
+
+<p align="center">
+  <img src="visual/annaconda1.png" alt="annaconda on Google Cloud" width="420">
+  <img src="visual/annaconda2.png" alt="annaconda on Google Cloud" width="420">
+</p>
+<p align="center">
+  <img src="visual/annaconda3.png" alt="annaconda on Google Cloud" width="420">
+  <img src="visual/annaconda4.png" alt="annaconda on Google Cloud" width="420">
+</p>
+
 The three things it is, at once:
 
 - **Purple team, not post-mortem.** Red runs a technique; annaconda emits a
