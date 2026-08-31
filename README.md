@@ -4,6 +4,16 @@
 
 # annaconda
 
+## Autonomous, live on Google Cloud
+
+`annaconda-sweeper` runs unattended on **Google Cloud Scheduler** — green, no
+errors — firing every 15 minutes into the `annaconda-sweeps` Pub/Sub topic so
+the agent fleet keeps working the case with no human in the loop.
+
+<p align="center">
+  <img src="visual/autonomo.png" alt="annaconda-sweeper live and green on Google Cloud Scheduler" width="900">
+</p>
+
 ## Know what happened on a compromised machine — fast, and in a way you can actually trust
 
 When a computer might be breached, someone has to figure out *what happened* —
