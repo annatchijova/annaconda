@@ -4,16 +4,25 @@
 
 # annaconda
 
-## Purple-team DFIR · a multi-agent fleet · real-time endpoint telemetry from Velociraptor
+## Know what happened on a compromised machine — fast, and in a way you can actually trust
 
-**annaconda works the endpoint while the attack is still unfolding.** It pulls
-live telemetry off the host through Velociraptor's own VQL engine, freezes what
-it collected into a hash-sealed evidence window, and adjudicates a reproducible,
-MITRE-mapped verdict — all *before* any language model is allowed to speak. A
-fleet of Google ADK + Gemini agents works cases **unattended**: choosing what to
-hunt, carrying an investigation's memory across weeks, escalating to a human when
-one is needed. Swap the narrator and the verdict, its score, and its hash never
-change.
+When a computer might be breached, someone has to figure out *what happened* —
+under time pressure, buried in endpoint telemetry — and produce a verdict that
+holds up afterward, sometimes in court. It is slow, brutal work, and the AI
+tools that promise to help just hand you a confident verdict you cannot
+reproduce or defend, and that can be flatly wrong the moment the evidence is
+ambiguous. "Trust me" is not good enough when the output might become evidence.
+
+**annaconda works the endpoint while the attack is still unfolding.** A fleet of
+Google ADK + Gemini agents investigates the host **unattended** — pulling live
+telemetry through Velociraptor's own VQL engine, choosing what to hunt, carrying
+a case's memory across weeks, escalating to a human when one is needed. But the
+verdict itself is frozen into a hash-sealed evidence window and **adjudicated by
+deterministic code before any language model is allowed to speak** —
+reproducible, tamper-evident, and MITRE-mapped. Swap the narrator and the
+verdict, its score, and its hash never change. And when the evidence does not
+support a conclusion, it says so: a defensible *"I can't conclude"* beats a
+confident wrong answer.
 
 The three things it is, at once:
 
