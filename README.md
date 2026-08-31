@@ -324,6 +324,34 @@ cover, is in [docs/COMPLIANCE.md](docs/COMPLIANCE.md).
 | Google Agent Framework | **Google ADK** — an autonomous commander tasking a fleet of specialists (disjoint tool contracts, sealed registry), plus a single-operator investigator and a mentor. See [The agents](#the-agents). |
 | Google Cloud service | **Cloud Run** (backend) + **Firestore** (case persistence) + **Cloud Scheduler → Pub/Sub** (unattended operation, and the sealed-verdict push to SecOps) + **Vertex AI** |
 
+**These are real Gemini calls, not mocks.** The fleet, the investigator and the
+mentor issue live `gemini-3.5-flash` requests to Vertex AI through Google ADK.
+The only scripted model is in CI, on purpose — so tests stay deterministic and
+free — but the deployed service and any local run with a credential hit Vertex
+for real. Verify it yourself (prints the exact Vertex endpoint each call hits):
+
+```bash
+export GOOGLE_GENAI_USE_VERTEXAI=TRUE GOOGLE_CLOUD_PROJECT=vigia-497422 GOOGLE_CLOUD_LOCATION=global
+python - <<'PY'
+from google.genai import _api_client as ac
+_o = ac.BaseApiClient._build_request
+ac.BaseApiClient._build_request = lambda self,m,p,d,o=None:(lambda r:(print("[VERTEX-CALL]",r.method,r.url) or r))(_o(self,m,p,d,o))
+import asyncio
+from agent.consult_tools import ConsultTools
+from agent.consult_agent import build_consult_agent
+from google.adk.runners import InMemoryRunner
+from google.genai import types
+ag = build_consult_agent(ConsultTools()); r = InMemoryRunner(agent=ag, app_name="m")
+async def go():
+    await r.session_service.create_session(app_name="m", user_id="u", session_id="s")
+    async for e in r.run_async(user_id="u", session_id="s",
+        new_message=types.Content(role="user", parts=[types.Part(text="In one sentence, what does an ABSTAIN verdict mean?")])):
+        pass
+asyncio.run(go())
+PY
+# prints POSTs to https://aiplatform.googleapis.com/.../models/gemini-3.5-flash:generateContent
+```
+
 Against the **Fortified Enterprise Fleet** criteria specifically:
 
 | Criterion | Where |
