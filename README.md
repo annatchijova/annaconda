@@ -455,6 +455,23 @@ not read or write real Firestore between runs.
 The suite includes the load-bearing guarantee: the same case scored in two fresh
 processes (different `PYTHONHASHSEED`) produces byte-identical seals.
 
+### MCP server (read-only)
+
+`service/mcp_server.py` is a curated, read-only MCP bridge over this
+service's own HTTP API — a thin wrapper, not a re-implementation. It only
+proxies GET routes (`health`, `registry`, `catalog`, `hunts`, `cases`,
+single-case lookup, STIX/CACAO export). It never exposes any route that
+creates a case, starts a live investigation, or pushes to an external
+system. Requires the service itself to already be running:
+
+```bash
+uvicorn service.app:app --port 8080 &
+ANNACONDA_BASE_URL=http://127.0.0.1:8080 python3 -m service.mcp_server
+```
+
+Registered in the [cuartel](https://github.com/annatchijova/cuartel) MCP
+registry for Claude Code / Codex / OpenCode.
+
 ## Tech stack
 
 Python 3.12 · FastAPI on Cloud Run · Google ADK · Gemini 3.5 via Vertex AI ·

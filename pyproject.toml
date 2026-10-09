@@ -11,13 +11,21 @@ license = { text = "Apache-2.0" }
 # The decision path is stdlib-only by design (Daubert discipline: no floats,
 # no black-box dependencies in any sealed value). Keep this list empty unless
 # the addition is confined to the narrative/UX layer.
-dependencies = []
+dependencies = [
+    # service/mcp_server.py only: a curated read-only MCP bridge over
+    # annaconda's own HTTP API, using stdlib urllib for the HTTP side. Not
+    # part of the decision path.
+    "mcp>=1.0",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
+[project.scripts]
+annaconda-mcp = "service.mcp_server:main"
+
 [tool.setuptools]
-packages = ["core", "sift", "ml", "tools", "pipeline", "inference", "security", "verdict", "scripts_lib"]
+packages = ["core", "sift", "ml", "tools", "pipeline", "inference", "security", "verdict", "scripts_lib", "service"]
 py-modules = ["vigia_agent", "vigia_scorer", "sift_orchestrator_shim"]
 
 [tool.pytest.ini_options]
